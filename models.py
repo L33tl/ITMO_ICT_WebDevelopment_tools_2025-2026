@@ -125,6 +125,11 @@ class TeamWithParticipants(TeamBase):
     participants: List[Participant] = []
 
 
+class SkillWithParticipants(SkillBase):
+    id: int
+    participants: List[Participant] = []
+
+
 class TaskWithSubmissions(TaskBase):
     id: int
     submissions: List[Submission] = []

@@ -5,7 +5,7 @@ from sqlmodel import Session, select
 from models import (
     Participant, ParticipantBase, ParticipantWithSkills,
     Team, TeamBase, TeamWithParticipants,
-    Skill, SkillBase,
+    Skill, SkillBase, SkillWithParticipants,
     Task, TaskBase, TaskWithSubmissions,
     Submission, SubmissionBase, SubmissionWithRelations,
     ParticipantSkillLink, TeamParticipantLink
@@ -92,17 +92,19 @@ def teams_list(session: Session = Depends(get_session)) -> list[Team]:
 
 
 @app.get("/team/{team_id}", response_model=TeamWithParticipants)
-def team_get(team_id: int, session: Session = Depends(get_session)) -> Team:
+def team_get(team_id: int, session: Session = Depends(get_session)) -> TeamWithParticipants:
     """Get team by ID with participants"""
     team = session.get(Team, team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
+    # Trigger loading of participants
+    _ = team.participants
     return team
 
 
 @app.post("/team")
 def team_create(
-    team: TeamBase, 
+    team: TeamBase,
     session: Session = Depends(get_session)
 ) -> TypedDict('Response', {"status": int, "data": Team}):
     """Create a new team"""
@@ -113,24 +115,59 @@ def team_create(
     return {"status": 200, "data": db_team}
 
 
+@app.patch("/team/{team_id}")
+def team_update(
+    team_id: int,
+    team: TeamBase,
+    session: Session = Depends(get_session)
+) -> Team:
+    """Update team partially"""
+    db_team = session.get(Team, team_id)
+    if not db_team:
+        raise HTTPException(status_code=404, detail="Team not found")
+
+    team_data = team.model_dump(exclude_unset=True)
+    for key, value in team_data.items():
+        setattr(db_team, key, value)
+
+    session.add(db_team)
+    session.commit()
+    session.refresh(db_team)
+    return db_team
+
+
+@app.delete("/team/{team_id}")
+def team_delete(team_id: int, session: Session = Depends(get_session)):
+    """Delete team"""
+    team = session.get(Team, team_id)
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+
+    session.delete(team)
+    session.commit()
+    return {"status": 200, "message": "Team deleted successfully"}
+
+
 @app.get("/skills", response_model=list[Skill])
 def skills_list(session: Session = Depends(get_session)) -> list[Skill]:
     """Get all skills"""
     return session.exec(select(Skill)).all()
 
 
-@app.get("/skill/{skill_id}", response_model=Skill)
-def skill_get(skill_id: int, session: Session = Depends(get_session)) -> Skill:
-    """Get skill by ID"""
+@app.get("/skill/{skill_id}", response_model=SkillWithParticipants)
+def skill_get(skill_id: int, session: Session = Depends(get_session)) -> SkillWithParticipants:
+    """Get skill by ID with participants"""
     skill = session.get(Skill, skill_id)
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
+    # Trigger loading of participants
+    _ = skill.participants
     return skill
 
 
 @app.post("/skill")
 def skill_create(
-    skill: SkillBase, 
+    skill: SkillBase,
     session: Session = Depends(get_session)
 ) -> TypedDict('Response', {"status": int, "data": Skill}):
     """Create a new skill"""
@@ -141,6 +178,39 @@ def skill_create(
     return {"status": 200, "data": db_skill}
 
 
+@app.patch("/skill/{skill_id}")
+def skill_update(
+    skill_id: int,
+    skill: SkillBase,
+    session: Session = Depends(get_session)
+) -> Skill:
+    """Update skill partially"""
+    db_skill = session.get(Skill, skill_id)
+    if not db_skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    skill_data = skill.model_dump(exclude_unset=True)
+    for key, value in skill_data.items():
+        setattr(db_skill, key, value)
+
+    session.add(db_skill)
+    session.commit()
+    session.refresh(db_skill)
+    return db_skill
+
+
+@app.delete("/skill/{skill_id}")
+def skill_delete(skill_id: int, session: Session = Depends(get_session)):
+    """Delete skill"""
+    skill = session.get(Skill, skill_id)
+    if not skill:
+        raise HTTPException(status_code=404, detail="Skill not found")
+
+    session.delete(skill)
+    session.commit()
+    return {"status": 200, "message": "Skill deleted successfully"}
+
+
 @app.get("/tasks", response_model=list[Task])
 def tasks_list(session: Session = Depends(get_session)) -> list[Task]:
     """Get all tasks"""
@@ -148,17 +218,19 @@ def tasks_list(session: Session = Depends(get_session)) -> list[Task]:
 
 
 @app.get("/task/{task_id}", response_model=TaskWithSubmissions)
-def task_get(task_id: int, session: Session = Depends(get_session)) -> Task:
+def task_get(task_id: int, session: Session = Depends(get_session)) -> TaskWithSubmissions:
     """Get task by ID with submissions"""
     task = session.get(Task, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
+    # Trigger loading of submissions
+    _ = task.submissions
     return task
 
 
 @app.post("/task")
 def task_create(
-    task: TaskBase, 
+    task: TaskBase,
     session: Session = Depends(get_session)
 ) -> TypedDict('Response', {"status": int, "data": Task}):
     """Create a new task"""
@@ -169,6 +241,39 @@ def task_create(
     return {"status": 200, "data": db_task}
 
 
+@app.patch("/task/{task_id}")
+def task_update(
+    task_id: int,
+    task: TaskBase,
+    session: Session = Depends(get_session)
+) -> Task:
+    """Update task partially"""
+    db_task = session.get(Task, task_id)
+    if not db_task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    task_data = task.model_dump(exclude_unset=True)
+    for key, value in task_data.items():
+        setattr(db_task, key, value)
+
+    session.add(db_task)
+    session.commit()
+    session.refresh(db_task)
+    return db_task
+
+
+@app.delete("/task/{task_id}")
+def task_delete(task_id: int, session: Session = Depends(get_session)):
+    """Delete task"""
+    task = session.get(Task, task_id)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+
+    session.delete(task)
+    session.commit()
+    return {"status": 200, "message": "Task deleted successfully"}
+
+
 @app.get("/submissions", response_model=list[Submission])
 def submissions_list(session: Session = Depends(get_session)) -> list[Submission]:
     """Get all submissions"""
@@ -176,17 +281,21 @@ def submissions_list(session: Session = Depends(get_session)) -> list[Submission
 
 
 @app.get("/submission/{submission_id}", response_model=SubmissionWithRelations)
-def submission_get(submission_id: int, session: Session = Depends(get_session)) -> Submission:
+def submission_get(submission_id: int, session: Session = Depends(get_session)) -> SubmissionWithRelations:
     """Get submission by ID with relations"""
     submission = session.get(Submission, submission_id)
     if not submission:
         raise HTTPException(status_code=404, detail="Submission not found")
+    # Trigger loading of relations
+    _ = submission.task
+    _ = submission.team
+    _ = submission.participant
     return submission
 
 
 @app.post("/submission")
 def submission_create(
-    submission: SubmissionBase, 
+    submission: SubmissionBase,
     session: Session = Depends(get_session)
 ) -> TypedDict('Response', {"status": int, "data": Submission}):
     """Create a new submission"""
@@ -195,6 +304,39 @@ def submission_create(
     session.commit()
     session.refresh(db_submission)
     return {"status": 200, "data": db_submission}
+
+
+@app.patch("/submission/{submission_id}")
+def submission_update(
+    submission_id: int,
+    submission: SubmissionBase,
+    session: Session = Depends(get_session)
+) -> Submission:
+    """Update submission partially"""
+    db_submission = session.get(Submission, submission_id)
+    if not db_submission:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    submission_data = submission.model_dump(exclude_unset=True)
+    for key, value in submission_data.items():
+        setattr(db_submission, key, value)
+
+    session.add(db_submission)
+    session.commit()
+    session.refresh(db_submission)
+    return db_submission
+
+
+@app.delete("/submission/{submission_id}")
+def submission_delete(submission_id: int, session: Session = Depends(get_session)):
+    """Delete submission"""
+    submission = session.get(Submission, submission_id)
+    if not submission:
+        raise HTTPException(status_code=404, detail="Submission not found")
+
+    session.delete(submission)
+    session.commit()
+    return {"status": 200, "message": "Submission deleted successfully"}
 
 
 @app.post("/participant/{participant_id}/skill/{skill_id}")
