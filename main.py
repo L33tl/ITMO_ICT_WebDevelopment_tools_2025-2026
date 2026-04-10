@@ -1,6 +1,7 @@
-from fastapi import FastAPI, Depends, HTTPException
+from fastapi import FastAPI, Depends, HTTPException, status
 from typing_extensions import TypedDict
 from sqlmodel import Session, select
+from datetime import datetime, timedelta
 
 from models import (
     Participant, ParticipantBase, ParticipantWithSkills,
@@ -8,9 +9,15 @@ from models import (
     Skill, SkillBase, SkillWithParticipants,
     Task, TaskBase, TaskWithSubmissions,
     Submission, SubmissionBase, SubmissionWithRelations,
-    ParticipantSkillLink, TeamParticipantLink
+    ParticipantSkillLink, TeamParticipantLink,
+    User, UserCreate, UserResponse, UserUpdate, UserLogin, Token
 )
 from connection import get_session, init_db
+from auth import (
+    get_password_hash, verify_password, create_access_token,
+    authenticate_user, get_current_user, get_current_active_user,
+    get_current_superuser, ACCESS_TOKEN_EXPIRE_MINUTES
+)
 
 app = FastAPI()
 
@@ -21,19 +28,142 @@ def on_startup():
     init_db()
 
 
-@app.get('/')
+@app.get('/', tags=["General"])
 def hello():
     return 'Hackathon Management System API'
 
 
-@app.get("/participants", response_model=list[Participant])
-def participants_list(session: Session = Depends(get_session)) -> list[Participant]:
+@app.post("/register", response_model=UserResponse, tags=["Authentication"])
+def register(user: UserCreate, session: Session = Depends(get_session)):
+    """Register a new user."""
+    # Check if username already exists
+    existing_user = session.exec(select(User).where(User.username == user.username)).first()
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Username already registered"
+        )
+
+    # Check if email already exists
+    existing_email = session.exec(select(User).where(User.email == user.email)).first()
+    if existing_email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered"
+        )
+
+    # Create new user
+    hashed_password = get_password_hash(user.password)
+    db_user = User(
+        username=user.username,
+        email=user.email,
+        full_name=user.full_name,
+        hashed_password=hashed_password,
+        created_at=datetime.utcnow().isoformat(),
+        updated_at=datetime.utcnow().isoformat()
+    )
+
+    session.add(db_user)
+    session.commit()
+    session.refresh(db_user)
+    return db_user
+
+
+@app.post("/login", response_model=Token, tags=["Authentication"])
+def login(user_data: UserLogin, session: Session = Depends(get_session)):
+    """Login user and return JWT token."""
+    user = authenticate_user(session, user_data.username, user_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    
+    access_token_expires = timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+
+@app.get("/users/me", response_model=UserResponse, tags=["Users"])
+def read_users_me(current_user: User = Depends(get_current_active_user)):
+    """Get current user information."""
+    return current_user
+
+
+@app.get("/users", response_model=list[UserResponse], tags=["Users"])
+def read_users(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_superuser)
+):
+    """Get list of all users (admin only)."""
+    users = session.exec(select(User)).all()
+    return users
+
+
+@app.put("/users/me", response_model=UserResponse, tags=["Users"])
+def update_user_me(
+    user_update: UserUpdate,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Update current user profile."""
+    user_data = user_update.model_dump(exclude_unset=True, exclude={"password"})
+    
+    # Handle password update separately
+    if user_update.password:
+        current_user.hashed_password = get_password_hash(user_update.password)
+    
+    for key, value in user_data.items():
+        setattr(current_user, key, value)
+    
+    current_user.updated_at = datetime.utcnow().isoformat()
+    session.add(current_user)
+    session.commit()
+    session.refresh(current_user)
+    return current_user
+
+
+@app.put("/users/me/password", tags=["Users"])
+def change_password(
+    old_password: str,
+    new_password: str,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Change user password."""
+    # Verify old password
+    if not verify_password(old_password, current_user.hashed_password):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Incorrect old password"
+        )
+    
+    # Update password
+    current_user.hashed_password = get_password_hash(new_password)
+    current_user.updated_at = datetime.utcnow().isoformat()
+    session.add(current_user)
+    session.commit()
+    return {"message": "Password updated successfully"}
+
+
+@app.get("/participants", response_model=list[Participant], tags=["Participants"])
+def participants_list(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
+) -> list[Participant]:
     """Get all participants"""
     return session.exec(select(Participant)).all()
 
 
-@app.get("/participant/{participant_id}", response_model=ParticipantWithSkills)
-def participant_get(participant_id: int, session: Session = Depends(get_session)) -> Participant:
+@app.get("/participant/{participant_id}", response_model=ParticipantWithSkills, tags=["Participants"])
+def participant_get(
+    participant_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
+) -> Participant:
     """Get participant by ID with skills"""
     participant = session.get(Participant, participant_id)
     if not participant:
@@ -41,10 +171,12 @@ def participant_get(participant_id: int, session: Session = Depends(get_session)
     return participant
 
 
-@app.post("/participant")
-def participant_create(participant: ParticipantBase,
-                       session: Session = Depends(get_session)
-                    ) -> TypedDict('Response', {"status": int, "data": Participant}):
+@app.post("/participant", tags=["Participants"])
+def participant_create(
+    participant: ParticipantBase,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
+) -> TypedDict('Response', {"status": int, "data": Participant}):
     """Create a new participant"""
     db_participant = Participant.model_validate(participant)
     session.add(db_participant)
@@ -53,11 +185,13 @@ def participant_create(participant: ParticipantBase,
     return {"status": 200, "data": db_participant}
 
 
-@app.patch("/participant/{participant_id}")
-def participant_update(participant_id: int, 
-                       participant: ParticipantBase, 
-                       session: Session = Depends(get_session)
-                    ) -> Participant:
+@app.patch("/participant/{participant_id}", tags=["Participants"])
+def participant_update(
+    participant_id: int,
+    participant: ParticipantBase,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
+) -> Participant:
     """Update participant partially"""
     db_participant = session.get(Participant, participant_id)
     if not db_participant:
@@ -73,8 +207,12 @@ def participant_update(participant_id: int,
     return db_participant
 
 
-@app.delete("/participant/{participant_id}")
-def participant_delete(participant_id: int, session: Session = Depends(get_session)):
+@app.delete("/participant/{participant_id}", tags=["Participants"])
+def participant_delete(
+    participant_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
+):
     """Delete participant"""
     participant = session.get(Participant, participant_id)
     if not participant:
@@ -85,14 +223,21 @@ def participant_delete(participant_id: int, session: Session = Depends(get_sessi
     return {"status": 200, "message": "Participant deleted successfully"}
 
 
-@app.get("/teams", response_model=list[Team])
-def teams_list(session: Session = Depends(get_session)) -> list[Team]:
+@app.get("/teams", response_model=list[Team], tags=["Teams"])
+def teams_list(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
+) -> list[Team]:
     """Get all teams"""
     return session.exec(select(Team)).all()
 
 
-@app.get("/team/{team_id}", response_model=TeamWithParticipants)
-def team_get(team_id: int, session: Session = Depends(get_session)) -> TeamWithParticipants:
+@app.get("/team/{team_id}", response_model=TeamWithParticipants, tags=["Teams"])
+def team_get(
+    team_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
+) -> TeamWithParticipants:
     """Get team by ID with participants"""
     team = session.get(Team, team_id)
     if not team:
@@ -102,10 +247,11 @@ def team_get(team_id: int, session: Session = Depends(get_session)) -> TeamWithP
     return team
 
 
-@app.post("/team")
+@app.post("/team", tags=["Teams"])
 def team_create(
     team: TeamBase,
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
 ) -> TypedDict('Response', {"status": int, "data": Team}):
     """Create a new team"""
     db_team = Team.model_validate(team)
@@ -115,11 +261,12 @@ def team_create(
     return {"status": 200, "data": db_team}
 
 
-@app.patch("/team/{team_id}")
+@app.patch("/team/{team_id}", tags=["Teams"])
 def team_update(
     team_id: int,
     team: TeamBase,
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
 ) -> Team:
     """Update team partially"""
     db_team = session.get(Team, team_id)
@@ -136,8 +283,12 @@ def team_update(
     return db_team
 
 
-@app.delete("/team/{team_id}")
-def team_delete(team_id: int, session: Session = Depends(get_session)):
+@app.delete("/team/{team_id}", tags=["Teams"])
+def team_delete(
+    team_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
+):
     """Delete team"""
     team = session.get(Team, team_id)
     if not team:
@@ -148,14 +299,21 @@ def team_delete(team_id: int, session: Session = Depends(get_session)):
     return {"status": 200, "message": "Team deleted successfully"}
 
 
-@app.get("/skills", response_model=list[Skill])
-def skills_list(session: Session = Depends(get_session)) -> list[Skill]:
+@app.get("/skills", response_model=list[Skill], tags=["Skills"])
+def skills_list(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
+) -> list[Skill]:
     """Get all skills"""
     return session.exec(select(Skill)).all()
 
 
-@app.get("/skill/{skill_id}", response_model=SkillWithParticipants)
-def skill_get(skill_id: int, session: Session = Depends(get_session)) -> SkillWithParticipants:
+@app.get("/skill/{skill_id}", response_model=SkillWithParticipants, tags=["Skills"])
+def skill_get(
+    skill_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
+) -> SkillWithParticipants:
     """Get skill by ID with participants"""
     skill = session.get(Skill, skill_id)
     if not skill:
@@ -165,10 +323,11 @@ def skill_get(skill_id: int, session: Session = Depends(get_session)) -> SkillWi
     return skill
 
 
-@app.post("/skill")
+@app.post("/skill", tags=["Skills"])
 def skill_create(
     skill: SkillBase,
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
 ) -> TypedDict('Response', {"status": int, "data": Skill}):
     """Create a new skill"""
     db_skill = Skill.model_validate(skill)
@@ -178,11 +337,12 @@ def skill_create(
     return {"status": 200, "data": db_skill}
 
 
-@app.patch("/skill/{skill_id}")
+@app.patch("/skill/{skill_id}", tags=["Skills"])
 def skill_update(
     skill_id: int,
     skill: SkillBase,
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
 ) -> Skill:
     """Update skill partially"""
     db_skill = session.get(Skill, skill_id)
@@ -199,8 +359,12 @@ def skill_update(
     return db_skill
 
 
-@app.delete("/skill/{skill_id}")
-def skill_delete(skill_id: int, session: Session = Depends(get_session)):
+@app.delete("/skill/{skill_id}", tags=["Skills"])
+def skill_delete(
+    skill_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
+):
     """Delete skill"""
     skill = session.get(Skill, skill_id)
     if not skill:
@@ -211,14 +375,21 @@ def skill_delete(skill_id: int, session: Session = Depends(get_session)):
     return {"status": 200, "message": "Skill deleted successfully"}
 
 
-@app.get("/tasks", response_model=list[Task])
-def tasks_list(session: Session = Depends(get_session)) -> list[Task]:
+@app.get("/tasks", response_model=list[Task], tags=["Tasks"])
+def tasks_list(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
+) -> list[Task]:
     """Get all tasks"""
     return session.exec(select(Task)).all()
 
 
-@app.get("/task/{task_id}", response_model=TaskWithSubmissions)
-def task_get(task_id: int, session: Session = Depends(get_session)) -> TaskWithSubmissions:
+@app.get("/task/{task_id}", response_model=TaskWithSubmissions, tags=["Tasks"])
+def task_get(
+    task_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
+) -> TaskWithSubmissions:
     """Get task by ID with submissions"""
     task = session.get(Task, task_id)
     if not task:
@@ -228,10 +399,11 @@ def task_get(task_id: int, session: Session = Depends(get_session)) -> TaskWithS
     return task
 
 
-@app.post("/task")
+@app.post("/task", tags=["Tasks"])
 def task_create(
     task: TaskBase,
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
 ) -> TypedDict('Response', {"status": int, "data": Task}):
     """Create a new task"""
     db_task = Task.model_validate(task)
@@ -241,11 +413,12 @@ def task_create(
     return {"status": 200, "data": db_task}
 
 
-@app.patch("/task/{task_id}")
+@app.patch("/task/{task_id}", tags=["Tasks"])
 def task_update(
     task_id: int,
     task: TaskBase,
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
 ) -> Task:
     """Update task partially"""
     db_task = session.get(Task, task_id)
@@ -262,8 +435,12 @@ def task_update(
     return db_task
 
 
-@app.delete("/task/{task_id}")
-def task_delete(task_id: int, session: Session = Depends(get_session)):
+@app.delete("/task/{task_id}", tags=["Tasks"])
+def task_delete(
+    task_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
+):
     """Delete task"""
     task = session.get(Task, task_id)
     if not task:
@@ -274,14 +451,21 @@ def task_delete(task_id: int, session: Session = Depends(get_session)):
     return {"status": 200, "message": "Task deleted successfully"}
 
 
-@app.get("/submissions", response_model=list[Submission])
-def submissions_list(session: Session = Depends(get_session)) -> list[Submission]:
+@app.get("/submissions", response_model=list[Submission], tags=["Submissions"])
+def submissions_list(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
+) -> list[Submission]:
     """Get all submissions"""
     return session.exec(select(Submission)).all()
 
 
-@app.get("/submission/{submission_id}", response_model=SubmissionWithRelations)
-def submission_get(submission_id: int, session: Session = Depends(get_session)) -> SubmissionWithRelations:
+@app.get("/submission/{submission_id}", response_model=SubmissionWithRelations, tags=["Submissions"])
+def submission_get(
+    submission_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
+) -> SubmissionWithRelations:
     """Get submission by ID with relations"""
     submission = session.get(Submission, submission_id)
     if not submission:
@@ -293,10 +477,11 @@ def submission_get(submission_id: int, session: Session = Depends(get_session)) 
     return submission
 
 
-@app.post("/submission")
+@app.post("/submission", tags=["Submissions"])
 def submission_create(
     submission: SubmissionBase,
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
 ) -> TypedDict('Response', {"status": int, "data": Submission}):
     """Create a new submission"""
     db_submission = Submission.model_validate(submission)
@@ -306,11 +491,12 @@ def submission_create(
     return {"status": 200, "data": db_submission}
 
 
-@app.patch("/submission/{submission_id}")
+@app.patch("/submission/{submission_id}", tags=["Submissions"])
 def submission_update(
     submission_id: int,
     submission: SubmissionBase,
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
 ) -> Submission:
     """Update submission partially"""
     db_submission = session.get(Submission, submission_id)
@@ -327,8 +513,12 @@ def submission_update(
     return db_submission
 
 
-@app.delete("/submission/{submission_id}")
-def submission_delete(submission_id: int, session: Session = Depends(get_session)):
+@app.delete("/submission/{submission_id}", tags=["Submissions"])
+def submission_delete(
+    submission_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
+):
     """Delete submission"""
     submission = session.get(Submission, submission_id)
     if not submission:
@@ -339,12 +529,13 @@ def submission_delete(submission_id: int, session: Session = Depends(get_session
     return {"status": 200, "message": "Submission deleted successfully"}
 
 
-@app.post("/participant/{participant_id}/skill/{skill_id}")
+@app.post("/participant/{participant_id}/skill/{skill_id}", tags=["Relationships"])
 def add_skill_to_participant(
     participant_id: int,
     skill_id: int,
     proficiency_level: int = 1,
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Add a skill to a participant (many-to-many)"""
     participant = session.get(Participant, participant_id)
@@ -376,12 +567,13 @@ def add_skill_to_participant(
     return {"status": 200, "message": "Skill added to participant successfully"}
 
 
-@app.post("/team/{team_id}/participant/{participant_id}")
+@app.post("/team/{team_id}/participant/{participant_id}", tags=["Relationships"])
 def add_participant_to_team(
     team_id: int,
     participant_id: int,
     role: str = "member",
-    session: Session = Depends(get_session)
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
 ):
     """Add a participant to a team (many-to-many)"""
     team = session.get(Team, team_id)
@@ -413,8 +605,12 @@ def add_participant_to_team(
     return {"status": 200, "message": "Participant added to team successfully"}
 
 
-@app.get("/participant/{participant_id}/teams", response_model=list[Team])
-def get_participant_teams(participant_id: int, session: Session = Depends(get_session)):
+@app.get("/participant/{participant_id}/teams", response_model=list[Team], tags=["Relationships"])
+def get_participant_teams(
+    participant_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
+):
     """Get all teams for a participant"""
     participant = session.get(Participant, participant_id)
     if not participant:
@@ -422,8 +618,12 @@ def get_participant_teams(participant_id: int, session: Session = Depends(get_se
     return participant.teams
 
 
-@app.get("/team/{team_id}/participants", response_model=list[Participant])
-def get_team_participants(team_id: int, session: Session = Depends(get_session)):
+@app.get("/team/{team_id}/participants", response_model=list[Participant], tags=["Relationships"])
+def get_team_participants(
+    team_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
+):
     """Get all participants in a team"""
     team = session.get(Team, team_id)
     if not team:
@@ -431,8 +631,12 @@ def get_team_participants(team_id: int, session: Session = Depends(get_session))
     return team.participants
 
 
-@app.get("/task/{task_id}/submissions", response_model=list[Submission])
-def get_task_submissions(task_id: int, session: Session = Depends(get_session)):
+@app.get("/task/{task_id}/submissions", response_model=list[Submission], tags=["Relationships"])
+def get_task_submissions(
+    task_id: int,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
+):
     """Get all submissions for a task"""
     task = session.get(Task, task_id)
     if not task:

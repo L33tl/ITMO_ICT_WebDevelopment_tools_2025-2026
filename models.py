@@ -1,7 +1,7 @@
 from enum import Enum
 from typing import Optional, List
 from sqlmodel import SQLModel, Field, Relationship
-from pydantic import EmailStr
+from pydantic import EmailStr, SecretStr
 
 
 class ParticipantType(Enum):
@@ -51,6 +51,14 @@ class ParticipantBase(SQLModel):
     type: ParticipantType
 
 
+class UserBase(SQLModel):
+    username: str
+    email: EmailStr
+    full_name: Optional[str] = None
+    is_active: bool = True
+    is_superuser: bool = False
+
+
 class TaskBase(SQLModel):
     title: str
     description: str
@@ -91,6 +99,13 @@ class Participant(ParticipantBase, table=True):
         back_populates="participants", link_model=TeamParticipantLink
     )
     submissions: List["Submission"] = Relationship(back_populates="participant")
+
+
+class User(UserBase, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    hashed_password: str = Field(nullable=False)
+    created_at: Optional[str] = Field(default=None, nullable=True)
+    updated_at: Optional[str] = Field(default=None, nullable=True)
 
 
 class Task(TaskBase, table=True):
@@ -140,3 +155,38 @@ class SubmissionWithRelations(SubmissionBase):
     task: Optional[Task] = None
     team: Optional[Team] = None
     participant: Optional[Participant] = None
+
+
+# User response models
+class UserResponse(UserBase):
+    id: int
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class UserCreate(SQLModel):
+    username: str
+    email: EmailStr
+    password: str
+    full_name: Optional[str] = None
+
+
+class UserUpdate(SQLModel):
+    email: Optional[EmailStr] = None
+    full_name: Optional[str] = None
+    password: Optional[str] = None
+    is_active: Optional[bool] = None
+
+
+class UserLogin(SQLModel):
+    username: str
+    password: str
+
+
+class Token(SQLModel):
+    access_token: str
+    token_type: str
+
+
+class TokenData(SQLModel):
+    username: Optional[str] = None
