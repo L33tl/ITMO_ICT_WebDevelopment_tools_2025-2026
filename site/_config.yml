@@ -1,0 +1,7 @@
+title: "Лабораторная работа 1: FastAPI Hackathon Management System"
+description: "Отчет по 1 лаб работе"
+theme: jekyll-theme-cayman
+show_downloads: false
+github:
+  is_project_page: true
+  repository_url: https://github.com/TonikX/ITMO_ICT_WebDevelopment_tools_2025-2026

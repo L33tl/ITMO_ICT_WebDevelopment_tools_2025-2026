@@ -1,0 +1,58 @@
+site_name: Лабораторная работа 1 - FastAPI Hackathon
+site_description: Отчет по 1 лаб работе
+site_author: TonikX
+repo_url: https://github.com/L33tl/ITMO_ICT_WebDevelopment_tools_2025-2026
+repo_name: ITMO_ICT_WebDevelopment_tools_2025-2026
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - toc.integrate
+    - navigation.top
+    - search.suggest
+    - search.highlight
+
+nav:
+  - Главная: index.md
+  - Код проекта:
+    - main.py: https://github.com/L33tl/ITMO_ICT_WebDevelopment_tools_2025-2026/blob/lab1/main.py
+    - models.py: https://github.com/L33tl/ITMO_ICT_WebDevelopment_tools_2025-2026/blob/lab1/models.py
+    - connection.py: https://github.com/L33tl/ITMO_ICT_WebDevelopment_tools_2025-2026/blob/lab1/connection.py
+    - auth.py: https://github.com/L33tl/ITMO_ICT_WebDevelopment_tools_2025-2026/blob/lab1/auth.py
+  - GitHub: https://github.com/L33tl/ITMO_ICT_WebDevelopment_tools_2025-2026
+
+markdown_extensions:
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - admonition
+  - pymdownx.extra
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true
+
+plugins:
+  - search
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/L33tl
+      name: L33tl on GitHub
