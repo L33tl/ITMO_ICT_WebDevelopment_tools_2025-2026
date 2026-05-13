@@ -2,6 +2,10 @@ from fastapi import FastAPI, Depends, HTTPException, status
 from typing_extensions import TypedDict
 from sqlmodel import Session, select
 from datetime import datetime, timedelta
+import aiohttp
+import logging
+from pydantic import BaseModel
+from typing import Any, Dict
 
 from models import (
     Participant, ParticipantBase, ParticipantWithSkills,
@@ -18,6 +22,13 @@ from auth import (
     authenticate_user, get_current_user, get_current_active_user,
     get_current_superuser, ACCESS_TOKEN_EXPIRE_MINUTES
 )
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+class ParseRequest(BaseModel):
+    """Модель запроса для парсинга URL"""
+    url: str
 
 app = FastAPI()
 
@@ -642,3 +653,53 @@ def get_task_submissions(
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     return task.submissions
+
+
+@app.post("/parse", tags=["Parsing"])
+async def parse_url(
+    parse_request: ParseRequest,
+    current_user: User = Depends(get_current_active_user)
+) -> Dict[str, Any]:
+    """
+    Parse a URL by forwarding request to parser service.
+    
+    Accepts a URL in JSON body, sends it to parser service (http://parser:8001/parse),
+    and returns the parsing results.
+    """
+    PARSER_SERVICE_URL = "http://parser-app:8001/parse"
+    
+    logger.info(f"Parsing URL: {parse_request.url} for user: {current_user.username}")
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            params = {"url": parse_request.url}
+            async with session.post(PARSER_SERVICE_URL, params=params, timeout=30) as response:
+                if response.status == 200:
+                    result = await response.json()
+                    logger.info(f"Successfully parsed URL: {parse_request.url}")
+                    return result
+                else:
+                    error_text = await response.text()
+                    logger.error(f"Parser service returned error: {response.status} - {error_text}")
+                    raise HTTPException(
+                        status_code=response.status,
+                        detail=f"Parser service error: {error_text}"
+                    )
+    except aiohttp.ClientConnectorError:
+        logger.error("Cannot connect to parser service. Service may be down.")
+        raise HTTPException(
+            status_code=503,
+            detail="Parser service is unavailable. Please try again later."
+        )
+    except aiohttp.ClientError as e:
+        logger.error(f"HTTP client error: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to communicate with parser service: {str(e)}"
+        )
+    except Exception as e:
+        logger.error(f"Unexpected error during parsing: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Internal server error: {str(e)}"
+        )
