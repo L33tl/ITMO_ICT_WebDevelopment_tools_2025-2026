@@ -2,6 +2,7 @@ from enum import Enum
 from typing import Optional, List
 from sqlmodel import SQLModel, Field, Relationship
 from pydantic import EmailStr, SecretStr
+from sqlalchemy import String
 
 
 class ParticipantType(Enum):
@@ -92,6 +93,7 @@ class Team(TeamBase, table=True):
 
 class Participant(ParticipantBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
+    email: str = Field(sa_type=String(255))
     skills: List[Skill] = Relationship(
         back_populates="participants", link_model=ParticipantSkillLink
     )
@@ -103,6 +105,7 @@ class Participant(ParticipantBase, table=True):
 
 class User(UserBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
+    email: str = Field(sa_type=String(255))
     hashed_password: str = Field(nullable=False)
     created_at: Optional[str] = Field(default=None, nullable=True)
     updated_at: Optional[str] = Field(default=None, nullable=True)
