@@ -186,7 +186,6 @@ def create_tasks(session):
 
 def assign_skills_to_participants(session, participants, skills):
     """Assign skills to participants with proficiency levels"""
-    # Define skill assignments: participant_index -> [skill_indices]
     assignments = [
         [0, 1, 5],      # Иван: Python, PostgreSQL, JavaScript
         [2, 3],         # Анна: Figma, Adobe Photoshop
@@ -220,7 +219,6 @@ def assign_skills_to_participants(session, participants, skills):
 
 def assign_participants_to_teams(session, participants, teams):
     """Assign participants to teams with roles"""
-    # Define team assignments: team_index -> [participant_indices]
     assignments = [
         [0, 2, 4, 6],   # Кододелы: Иван, Сергей, Алексей, Дмитрий
         [1, 5, 9],      # Креативщики: Анна, Елена, Наталья
@@ -307,7 +305,6 @@ def clear_database(session):
     """Clear all data from database (optional)"""
     print("Clearing existing data...")
     
-    # Delete in correct order to respect foreign key constraints
     session.exec("DELETE FROM submissions")
     session.exec("DELETE FROM teamparticipantlink")
     session.exec("DELETE FROM participantskilllink")
@@ -324,24 +321,18 @@ def main():
     """Main function to populate the database"""
     print("Starting database population...")
     
-    # Initialize database (create tables if they don't exist)
     init_db()
     
     with Session(engine) as session:
-        # Clear existing data (optional - uncomment if needed)
-        # clear_database(session)
         
-        # Create entities
         skills = create_skills(session)
         participants = create_participants(session)
         teams = create_teams(session)
         tasks = create_tasks(session)
         
-        # Create relationships
         assign_skills_to_participants(session, participants, skills)
         assign_participants_to_teams(session, participants, teams)
         
-        # Create submissions (needs IDs from created entities)
         submissions = create_submissions(session, tasks, teams, participants)
         
         print("\n=== Database Population Summary ===")
@@ -351,7 +342,6 @@ def main():
         print(f"Tasks: {len(tasks)}")
         print(f"Submissions: {len(submissions)}")
         
-        # Count relationships
         skill_links = session.exec(select(ParticipantSkillLink)).all()
         team_links = session.exec(select(TeamParticipantLink)).all()
         print(f"Participant-Skill links: {len(skill_links)}")

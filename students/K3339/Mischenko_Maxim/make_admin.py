@@ -25,20 +25,17 @@ def make_user_admin(session, user_identifier):
     """
     user = None
     
-    # Try to find user by ID (if identifier is numeric)
     if user_identifier.isdigit():
         user = session.get(User, int(user_identifier))
         if user:
             print(f"Found user by ID {user_identifier}: {user.username}")
     
-    # If not found by ID, try by username
     if not user:
         statement = select(User).where(User.username == user_identifier)
         user = session.exec(statement).first()
         if user:
             print(f"Found user by username: {user.username}")
     
-    # If not found by username, try by email
     if not user:
         statement = select(User).where(User.email == user_identifier)
         user = session.exec(statement).first()
@@ -49,12 +46,10 @@ def make_user_admin(session, user_identifier):
         print(f"User '{user_identifier}' not found!")
         return None
     
-    # Check if already admin
     if user.is_superuser:
         print(f"User '{user.username}' is already an admin!")
         return user
     
-    # Update to admin
     user.is_superuser = True
     user.updated_at = "2026-04-10T21:47:22.722Z"  # Current timestamp
     session.add(user)
@@ -81,14 +76,12 @@ def create_admin_user(session, username, email, password, full_name=None):
     from auth import get_password_hash
     from datetime import datetime
     
-    # Check if user already exists
     existing = session.exec(select(User).where(
         (User.username == username) | (User.email == email)
     )).first()
     
     if existing:
         print(f"User with username '{username}' or email '{email}' already exists!")
-        # Make existing user admin
         existing.is_superuser = True
         session.add(existing)
         session.commit()
@@ -96,7 +89,6 @@ def create_admin_user(session, username, email, password, full_name=None):
         print(f"✓ Made existing user '{existing.username}' an admin!")
         return existing
     
-    # Create new admin user
     hashed_password = get_password_hash(password)
     db_user = User(
         username=username,

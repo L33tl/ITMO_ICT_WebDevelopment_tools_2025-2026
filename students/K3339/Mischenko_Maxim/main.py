@@ -1,11 +1,12 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, BackgroundTasks
 from typing_extensions import TypedDict
 from sqlmodel import Session, select
 from datetime import datetime, timedelta
 import aiohttp
 import logging
-from pydantic import BaseModel
-from typing import Any, Dict
+from pydantic import BaseModel, Field
+from typing import Any, Dict, Optional, List
+import os
 
 from models import (
     Participant, ParticipantBase, ParticipantWithSkills,
@@ -23,12 +24,39 @@ from auth import (
     get_current_superuser, ACCESS_TOKEN_EXPIRE_MINUTES
 )
 
+try:
+    from celery_config import celery_app
+    from celery_tasks import parse_url_task, health_check_task, batch_parse_task
+    CELERY_AVAILABLE = True
+except ImportError:
+    CELERY_AVAILABLE = False
+    logger.warning("Celery not available. Async parsing will not work.")
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 class ParseRequest(BaseModel):
     """Модель запроса для парсинга URL"""
     url: str
+
+class AsyncParseRequest(BaseModel):
+    """Модель запроса для асинхронного парсинга URL"""
+    url: str = Field(..., description="URL для парсинга")
+    callback_url: Optional[str] = Field(None, description="URL для callback уведомления о завершении")
+
+class BatchParseRequest(BaseModel):
+    """Модель запроса для пакетного парсинга URL"""
+    urls: List[str] = Field(..., description="Список URL для парсинга")
+    callback_url: Optional[str] = Field(None, description="URL для callback уведомления о завершении")
+
+class TaskResponse(BaseModel):
+    """Модель ответа с информацией о задаче"""
+    task_id: str
+    status: str
+    message: str
+    url: Optional[str] = None
+    urls: Optional[List[str]] = None
+    check_status_url: str
 
 app = FastAPI()
 
@@ -47,7 +75,6 @@ def hello():
 @app.post("/register", response_model=UserResponse, tags=["Authentication"])
 def register(user: UserCreate, session: Session = Depends(get_session)):
     """Register a new user."""
-    # Check if username already exists
     existing_user = session.exec(select(User).where(User.username == user.username)).first()
     if existing_user:
         raise HTTPException(
@@ -55,7 +82,6 @@ def register(user: UserCreate, session: Session = Depends(get_session)):
             detail="Username already registered"
         )
 
-    # Check if email already exists
     existing_email = session.exec(select(User).where(User.email == user.email)).first()
     if existing_email:
         raise HTTPException(
@@ -63,7 +89,6 @@ def register(user: UserCreate, session: Session = Depends(get_session)):
             detail="Email already registered"
         )
 
-    # Create new user
     hashed_password = get_password_hash(user.password)
     db_user = User(
         username=user.username,
@@ -123,7 +148,6 @@ def update_user_me(
     """Update current user profile."""
     user_data = user_update.model_dump(exclude_unset=True, exclude={"password"})
     
-    # Handle password update separately
     if user_update.password:
         current_user.hashed_password = get_password_hash(user_update.password)
     
@@ -145,14 +169,12 @@ def change_password(
     current_user: User = Depends(get_current_active_user)
 ):
     """Change user password."""
-    # Verify old password
     if not verify_password(old_password, current_user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Incorrect old password"
         )
     
-    # Update password
     current_user.hashed_password = get_password_hash(new_password)
     current_user.updated_at = datetime.utcnow().isoformat()
     session.add(current_user)
@@ -253,7 +275,6 @@ def team_get(
     team = session.get(Team, team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
-    # Trigger loading of participants
     _ = team.participants
     return team
 
@@ -329,7 +350,6 @@ def skill_get(
     skill = session.get(Skill, skill_id)
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
-    # Trigger loading of participants
     _ = skill.participants
     return skill
 
@@ -405,7 +425,6 @@ def task_get(
     task = session.get(Task, task_id)
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
-    # Trigger loading of submissions
     _ = task.submissions
     return task
 
@@ -481,7 +500,6 @@ def submission_get(
     submission = session.get(Submission, submission_id)
     if not submission:
         raise HTTPException(status_code=404, detail="Submission not found")
-    # Trigger loading of relations
     _ = submission.task
     _ = submission.team
     _ = submission.participant
@@ -555,7 +573,6 @@ def add_skill_to_participant(
     if not participant or not skill:
         raise HTTPException(status_code=404, detail="Participant or Skill not found")
 
-    # Check if relationship already exists
     existing = session.exec(
         select(ParticipantSkillLink).where(
             ParticipantSkillLink.participant_id == participant_id,
@@ -566,7 +583,6 @@ def add_skill_to_participant(
     if existing:
         raise HTTPException(status_code=400, detail="Skill already added to participant")
 
-    # Create the relationship
     link = ParticipantSkillLink(
         participant_id=participant_id,
         skill_id=skill_id,
@@ -593,7 +609,6 @@ def add_participant_to_team(
     if not team or not participant:
         raise HTTPException(status_code=404, detail="Team or Participant not found")
     
-    # Check if relationship already exists
     existing = session.exec(
         select(TeamParticipantLink).where(
             TeamParticipantLink.team_id == team_id,
@@ -604,7 +619,6 @@ def add_participant_to_team(
     if existing:
         raise HTTPException(status_code=400, detail="Participant already in team")
     
-    # Create the relationship
     link = TeamParticipantLink(
         team_id=team_id,
         participant_id=participant_id,
@@ -703,3 +717,164 @@ async def parse_url(
             status_code=500,
             detail=f"Internal server error: {str(e)}"
         )
+
+
+@app.post("/parse/async", tags=["Parsing"], response_model=TaskResponse)
+async def parse_url_async(
+    parse_request: AsyncParseRequest,
+    current_user: User = Depends(get_current_active_user)
+) -> TaskResponse:
+    """
+    Асинхронный парсинг URL через Celery очередь.
+    
+    Принимает URL в теле запроса, ставит задачу в очередь Celery
+    и возвращает идентификатор задачи для отслеживания статуса.
+    """
+    if not CELERY_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="Celery service is not available. Async parsing is disabled."
+        )
+    
+    logger.info(f"Starting async parsing of URL: {parse_request.url} for user: {current_user.username}")
+    
+    try:
+        task = parse_url_task.delay(parse_request.url)
+        task_id = task.id
+        
+        logger.info(f"Task {task_id} created for URL: {parse_request.url}")
+        
+        return TaskResponse(
+            task_id=task_id,
+            status="pending",
+            message="Задача на парсинг URL поставлена в очередь",
+            url=parse_request.url,
+            check_status_url=f"http://localhost:5555/task/{task_id}"
+        )
+    except Exception as e:
+        logger.error(f"Failed to create Celery task: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create async parsing task: {str(e)}"
+        )
+
+
+@app.post("/parse/batch", tags=["Parsing"], response_model=TaskResponse)
+async def parse_batch_urls(
+    batch_request: BatchParseRequest,
+    current_user: User = Depends(get_current_active_user)
+) -> TaskResponse:
+    """
+    Пакетный асинхронный парсинг нескольких URL через Celery очередь.
+    
+    Принимает список URL в теле запроса, ставит задачу в очередь Celery
+    и возвращает идентификатор задачи для отслеживания статуса.
+    """
+    if not CELERY_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="Celery service is not available. Async parsing is disabled."
+        )
+    
+    if not batch_request.urls:
+        raise HTTPException(
+            status_code=400,
+            detail="Список URL не может быть пустым"
+        )
+    
+    logger.info(f"Starting batch async parsing of {len(batch_request.urls)} URLs for user: {current_user.username}")
+    
+    try:
+        task = batch_parse_task.delay(batch_request.urls)
+        task_id = task.id
+        
+        logger.info(f"Batch task {task_id} created for {len(batch_request.urls)} URLs")
+        
+        return TaskResponse(
+            task_id=task_id,
+            status="pending",
+            message=f"Задача на пакетный парсинг {len(batch_request.urls)} URL поставлена в очередь",
+            urls=batch_request.urls,
+            check_status_url=f"/tasks/{task_id}/status"
+        )
+    except Exception as e:
+        logger.error(f"Failed to create Celery batch task: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to create async batch parsing task: {str(e)}"
+        )
+
+
+@app.get("/tasks/{task_id}/status", tags=["Tasks"])
+async def get_task_status(
+    task_id: str,
+    current_user: User = Depends(get_current_active_user)
+) -> Dict[str, Any]:
+    """
+    Получить статус задачи Celery по её идентификатору.
+    """
+    if not CELERY_AVAILABLE:
+        raise HTTPException(
+            status_code=503,
+            detail="Celery service is not available. Task status checking is disabled."
+        )
+    
+    try:
+        task_result = celery_app.AsyncResult(task_id)
+        
+        response = {
+            "task_id": task_id,
+            "status": task_result.status,
+            "ready": task_result.ready(),
+            "successful": task_result.successful(),
+            "failed": task_result.failed()
+        }
+        
+        if task_result.ready():
+            if task_result.successful():
+                response["result"] = task_result.result
+            else:
+                response["error"] = str(task_result.result) if task_result.result else "Unknown error"
+        
+        if hasattr(task_result, "info") and task_result.info:
+            if isinstance(task_result.info, dict):
+                response.update(task_result.info)
+            else:
+                response["info"] = task_result.info
+        
+        return response
+    except Exception as e:
+        logger.error(f"Failed to get task status for {task_id}: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to get task status: {str(e)}"
+        )
+
+
+@app.get("/celery/health", tags=["Tasks"])
+async def celery_health_check() -> Dict[str, Any]:
+    """
+    Проверка здоровья Celery worker.
+    """
+    if not CELERY_AVAILABLE:
+        return {
+            "status": "unavailable",
+            "message": "Celery is not configured"
+        }
+    
+    try:
+        task = health_check_task.delay()
+        task_id = task.id
+        
+        return {
+            "status": "healthy",
+            "message": "Celery worker is responding",
+            "task_id": task_id,
+            "check_task_url": f"/tasks/{task_id}/status"
+        }
+    except Exception as e:
+        logger.error(f"Celery health check failed: {str(e)}")
+        return {
+            "status": "unhealthy",
+            "message": f"Celery worker is not responding: {str(e)}"
+        }

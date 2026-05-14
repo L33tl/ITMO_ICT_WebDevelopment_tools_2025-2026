@@ -12,7 +12,6 @@ class ParticipantType(Enum):
     analyst = "analyst"
 
 
-# Association table for many-to-many between Participant and Skill
 class ParticipantSkillLink(SQLModel, table=True):
     participant_id: Optional[int] = Field(
         default=None, foreign_key="participant.id", primary_key=True
@@ -23,7 +22,6 @@ class ParticipantSkillLink(SQLModel, table=True):
     proficiency_level: int = Field(default=1, ge=1, le=5)
 
 
-# Association table for many-to-many between Team and Participant
 class TeamParticipantLink(SQLModel, table=True):
     team_id: Optional[int] = Field(
         default=None, foreign_key="team.id", primary_key=True
@@ -34,7 +32,6 @@ class TeamParticipantLink(SQLModel, table=True):
     role: str = Field(default="member")
 
 
-# Base models for POST requests (without table=True)
 class SkillBase(SQLModel):
     name: str
     description: Optional[str] = ""
@@ -75,7 +72,6 @@ class SubmissionBase(SQLModel):
     demo_url: Optional[str] = None
 
 
-# Table models with relationships
 class Skill(SkillBase, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     participants: List["Participant"] = Relationship(
@@ -127,7 +123,6 @@ class Submission(SubmissionBase, table=True):
     participant: Optional[Participant] = Relationship(back_populates="submissions")
 
 
-# Response models with nested relationships
 class ParticipantWithSkills(ParticipantBase):
     id: int
     skills: List[Skill] = []
@@ -160,7 +155,6 @@ class SubmissionWithRelations(SubmissionBase):
     participant: Optional[Participant] = None
 
 
-# User response models
 class UserResponse(UserBase):
     id: int
     created_at: Optional[str] = None

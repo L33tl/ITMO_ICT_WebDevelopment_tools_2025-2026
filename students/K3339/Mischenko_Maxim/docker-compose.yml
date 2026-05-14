@@ -1,0 +1,129 @@
+services:
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    restart: unless-stopped
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres52
+      POSTGRES_DB: hackaton_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  fastapi-app:
+    build: .
+    container_name: fastapi-app
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DB_ADMIN=postgresql://postgres:postgres52@postgres:5432/hackaton_db
+      - DATABASE_URL=postgresql://postgres:postgres52@postgres:5432/hackaton_db
+      - SECRET_KEY=67-key-67
+      - ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=30
+    depends_on:
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - ./2/web_scraping.db:/app/2/web_scraping.db
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  parser-app:
+    build: .
+    container_name: parser-app
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      - DB_ADMIN=postgresql://postgres:postgres52@postgres:5432/hackaton_db
+      - DATABASE_URL=postgresql://postgres:postgres52@postgres:5432/hackaton_db
+    depends_on:
+      - postgres
+    volumes:
+      - .:/app
+      - ./2/web_scraping.db:/app/2/web_scraping.db
+    command: uvicorn parser_app:app --host 0.0.0.0 --port 8001 --reload
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  celery-worker:
+    build: .
+    container_name: celery-worker
+    restart: unless-stopped
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DB_ADMIN=postgresql://postgres:postgres52@postgres:5432/hackaton_db
+      - DATABASE_URL=postgresql://postgres:postgres52@postgres:5432/hackaton_db
+      - SECRET_KEY=67-key-67
+      - ALGORITHM=HS256
+      - ACCESS_TOKEN_EXPIRE_MINUTES=30
+    depends_on:
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - ./2/web_scraping.db:/app/2/web_scraping.db
+    command: celery -A celery_config.celery_app worker --loglevel=info --concurrency=4
+
+  celery-beat:
+    build: .
+    container_name: celery-beat
+    restart: unless-stopped
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DB_ADMIN=postgresql://postgres:postgres52@postgres:5432/hackaton_db
+      - DATABASE_URL=postgresql://postgres:postgres52@postgres:5432/hackaton_db
+    depends_on:
+      redis:
+        condition: service_started
+      postgres:
+        condition: service_healthy
+    volumes:
+      - .:/app
+      - ./2/web_scraping.db:/app/2/web_scraping.db
+    command: celery -A celery_config.celery_app beat --loglevel=info
+
+  flower:
+    build: .
+    container_name: flower
+    restart: unless-stopped
+    ports:
+      - "5555:5555"
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - CELERY_BROKER_URL=redis://redis:6379/0
+    depends_on:
+      - redis
+      - celery-worker
+    command: celery -A celery_config.celery_app flower --port=5555
+
+volumes:
+  postgres_data:
+  redis_data:
