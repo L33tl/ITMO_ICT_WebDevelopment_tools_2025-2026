@@ -1260,6 +1260,204 @@
 - <a href="http://localhost:8000/docs">Документация API (Swagger)</a>
 - <a href="https://rendex85.github.io/WebDevelopmentLabsDocs/lr2/lr2/">Текст лабораторной работы</a></p>
 
+<hr />
+<h1 id="lab3">Лабораторная работа 3: Упаковка FastAPI приложения в Docker, Работа с источниками данных и Очереди<a class="headerlink" href="#lab3" title="Permanent link">&para;</a></h1>
+<h2 id="lab3-goal">Цель работы<a class="headerlink" href="#lab3-goal" title="Permanent link">&para;</a></h2>
+<p>Упаковка FastAPI приложения, базы данных и парсера данных в Docker контейнеры с созданием оркестрации сервисов через Docker Compose.</p>
+<h2 id="lab3-tasks">Задачи<a class="headerlink" href="#lab3-tasks" title="Permanent link">&para;</a></h2>
+<ol>
+<li>Создание FastAPI приложения (уже выполнено)</li>
+<li>Создание базы данных (уже выполнено)</li>
+<li>Создание парсера данных (уже выполнено)</li>
+<li>Реализация возможности вызова парсера по HTTP</li>
+<li>Разработка Dockerfile для упаковки приложения</li>
+<li>Создание Docker Compose файла для оркестрации сервисов</li>
+</ol>
+<h2 id="lab3-execution">Выполнение работы<a class="headerlink" href="#lab3-execution" title="Permanent link">&para;</a></h2>
+<h3 id="lab3-http-parser">HTTP-интерфейс для парсера<a class="headerlink" href="#lab3-http-parser" title="Permanent link">&para;</a></h3>
+<p>Создано отдельное FastAPI приложение <code>parser_app.py</code> с следующими endpoint'ами:</p>
+<ul>
+<li><code>GET /</code> - информация о API</li>
+<li><code>POST /parse?url=<url></code> - парсинг указанного URL</li>
+<li><code>GET /health</code> - проверка работоспособности</li>
+<li><code>GET /stats</code> - статистика парсинга</li>
+</ul>
+<p>Пример использования:</p>
+<div class="highlight"><pre><span></span><code>curl -X POST "http://localhost:8001/parse?url=https://example.com"
+</code></pre></div>
+<h3 id="lab3-dockerfile">Dockerfile<a class="headerlink" href="#lab3-dockerfile" title="Permanent link">&para;</a></h3>
+<p>Разработан многостадийный Dockerfile для упаковки приложения:</p>
+<div class="highlight"><pre><span></span><code>FROM python:3.11-slim as builder
+# Установка зависимостей и компиляция
+COPY requirements.txt .
+RUN pip install --no-cache-dir --user -r requirements.txt
+
+FROM python:3.11-slim
+# Копирование зависимостей из builder
+COPY --from=builder /root/.local /root/.local
+COPY . .
+# Создание non-root пользователя для безопасности
+USER appuser
+EXPOSE 8000
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+</code></pre></div>
+<h3 id="lab3-docker-compose">Docker Compose конфигурация<a class="headerlink" href="#lab3-docker-compose" title="Permanent link">&para;</a></h3>
+<p>Создан файл <code>docker-compose.yml</code> для оркестрации сервисов:</p>
+<div class="highlight"><pre><span></span><code>services:
+  postgres:
+    image: postgres:16
+    ports: ["5432:5432"]
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres52
+      POSTGRES_DB: hackaton_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+  fastapi-app:
+    build: .
+    ports: ["8000:8000"]
+    environment:
+      DATABASE_URL: postgresql://postgres:postgres52@postgres:5432/hackaton_db
+    depends_on:
+      - postgres
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  parser-app:
+    build: .
+    ports: ["8001:8001"]
+    depends_on:
+      - postgres
+    command: uvicorn parser_app:app --host 0.0.0.0 --port 8001 --reload
+
+volumes:
+  postgres_data:
+</code></pre></div>
+<h3 id="lab3-architecture">Архитектура решения<a class="headerlink" href="#lab3-architecture" title="Permanent link">&para;</a></h3>
+<pre><code>┌─────────────────────────────────────────────────────────┐
+│                    Docker Compose                        │
+├──────────────┬────────────────┬─────────────────────────┤
+│  PostgreSQL  │  FastAPI App   │     Parser App          │
+│  (postgres)  │  (port 8000)   │     (port 8001)         │
+│              │                │                         │
+│  - База      │  - Основное    │  - HTTP интерфейс       │
+│    данных    │    приложение  │    для парсера          │
+│  - Постгрес  │  - API         │  - Парсинг веб-страниц  │
+│   16         │    хакатона    │  - SQLite для результатов│
+└──────────────┴────────────────┴─────────────────────────┘
+</code></pre>
+<h2 id="lab3-celery">Интеграция Celery и Redis<a class="headerlink" href="#lab3-celery" title="Permanent link">&para;</a></h2>
+<h3 id="lab3-celery-setup">Установка и настройка<a class="headerlink" href="#lab3-celery-setup" title="Permanent link">&para;</a></h3>
+<p>Добавлены зависимости в <code>requirements.txt</code>:</p>
+<ul>
+<li><code>celery==5.3.4</code> - для обработки фоновых задач</li>
+<li><code>redis==5.0.1</code> - в качестве брокера сообщений и хранилища результатов</li>
+<li><code>flower==2.0.1</code> - для мониторинга задач Celery</li>
+</ul>
+<p>Созданы файлы конфигурации:</p>
+<ul>
+<li><code>celery_config.py</code> - основной файл конфигурации Celery с настройкой Redis, маршрутов задач</li>
+<li><code>celery_tasks.py</code> - определения задач (парсинг URL, пакетный парсинг, проверка здоровья)</li>
+</ul>
+<h3 id="lab3-celery-beat">Периодические задачи (Celery Beat)<a class="headerlink" href="#lab3-celery-beat" title="Permanent link">&para;</a></h3>
+<p>Настроены автоматические задачи по расписанию:</p>
+<ol>
+<li><strong>health-check-every-2-min</strong> - Проверка здоровья Celery worker каждые 2 минуты</li>
+<li><strong>daily-batch-parse</strong> - Ежедневный пакетный парсинг важных URL в 3:00 AM</li>
+<li><strong>test-parse-every-10-min</strong> - Тестовый парсинг каждые 10 минут</li>
+<li><strong>weekly-health-report</strong> - Еженедельный отчет о здоровье системы каждый понедельник в 9:00 AM</li>
+<li><strong>hourly-test-task</strong> - Ежечасная тестовая задача</li>
+</ol>
+<h3 id="lab3-celery-architecture">Архитектура с очередями<a class="headerlink" href="#lab3-celery-architecture" title="Permanent link">&para;</a></h3>
+<pre><code>┌─────────────────┐    HTTP    ┌─────────────────┐
+│                 │───────────▶│                 │
+│   FastAPI App   │            │   Redis Broker  │
+│   (Port 8000)   │◀───────────│   (Port 6379)   │
+│                 │   Celery   │                 │
+└─────────────────┘   Tasks    └─────────────────┘
+         │                           │
+         │                           │
+         ▼                           ▼
+┌─────────────────┐         ┌─────────────────┐
+│                 │         │                 │
+│   Parser App    │         │  Celery Worker  │
+│   (Port 8001)   │         │   (4 processes) │
+│                 │         │                 │
+└─────────────────┘         └─────────────────┘
+         │                           │
+         │                           │
+         ▼                           ▼
+┌─────────────────┐         ┌─────────────────┐
+│                 │         │                 │
+│   PostgreSQL    │         │    Flower UI    │
+│   (Port 5432)   │         │   (Port 5555)   │
+│                 │         │                 │
+└─────────────────┘         └─────────────────┘
+</code></pre>
+<h3 id="lab3-celery-api">Использование API<a class="headerlink" href="#lab3-celery-api" title="Permanent link">&para;</a></h3>
+<p>Добавлены новые эндпоинты в FastAPI:</p>
+<ul>
+<li><code>POST /parse/async</code> - Асинхронный парсинг URL (возвращает <code>task_id</code>)</li>
+<li><code>POST /parse/batch</code> - Пакетный асинхронный парсинг</li>
+<li><code>GET /tasks/{task_id}/status</code> - Получение статуса задачи</li>
+<li><code>GET /celery/health</code> - Проверка здоровья Celery worker</li>
+</ul>
+<h2 id="lab3-instructions">Инструкция по запуску<a class="headerlink" href="#lab3-instructions" title="Permanent link">&para;</a></h2>
+<h3 id="lab3-prerequisites">Предварительные требования<a class="headerlink" href="#lab3-prerequisites" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Установленный Docker и Docker Compose</li>
+<li>2 ГБ свободной памяти</li>
+<li>Порты 8000, 8001, 5432, 6379, 5555 свободны</li>
+</ul>
+<h3 id="lab3-start">Запуск приложения<a class="headerlink" href="#lab3-start" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code># Запуск всех сервисов
+docker-compose up --build
+
+# Запуск в фоновом режиме
+docker-compose up -d
+</code></pre></div>
+<h3 id="lab3-check">Проверка работоспособности<a class="headerlink" href="#lab3-check" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code># Проверка основного приложения
+curl http://localhost:8000/
+
+# Проверка парсера
+curl http://localhost:8001/
+
+# Тестирование парсинга
+curl -X POST "http://localhost:8001/parse?url=https://example.com"
+
+# Проверка статистики
+curl http://localhost:8001/stats
+</code></pre></div>
+<h3 id="lab3-stop">Остановка приложения<a class="headerlink" href="#lab3-stop" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code># Остановка с удалением контейнеров
+docker-compose down
+
+# Остановка с удалением контейнеров и volumes
+docker-compose down -v
+</code></pre></div>
+<h2 id="lab3-testing">Тестирование<a class="headerlink" href="#lab3-testing" title="Permanent link">&para;</a></h2>
+<h3 id="lab3-test-docker">Тестирование Docker образа<a class="headerlink" href="#lab3-test-docker" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code># Сборка образа
+docker build -t fastapi-app .
+
+# Запуск контейнера
+docker run -p 8000:8000 fastapi-app
+</code></pre></div>
+<h3 id="lab3-test-celery">Тестирование Celery интеграции<a class="headerlink" href="#lab3-test-celery" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code>import requests
+
+# Тест асинхронного парсинга
+response = requests.post(
+    "http://localhost:8000/parse/async",
+    json={"url": "https://python.org"}
+)
+print(response.json())
+</code></pre></div>
+<h2 id="lab3-conclusion">Заключение<a class="headerlink" href="#lab3-conclusion" title="Permanent link">&para;</a></h2>
+<p>В рамках лабораторной работы успешно выполнена упаковка FastAPI приложения в Docker контейнеры, реализован HTTP-интерфейс для парсера данных и настроена оркестрация сервисов через Docker Compose. Дополнительно интегрированы Celery и Redis для обработки фоновых задач и периодического парсинга, что повышает масштабируемость и отказоустойчивость системы.</p>
+<p>Все компоненты работают в изолированных контейнерах, обеспечивая простоту развертывания и мониторинга через Flower UI.</p>
+
 
 
 
