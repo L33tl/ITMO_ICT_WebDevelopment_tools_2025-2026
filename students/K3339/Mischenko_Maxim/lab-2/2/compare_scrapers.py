@@ -137,20 +137,6 @@ def main():
         if fastest_approach[0] != "Sequential":
             speedup = sequential_time / fastest_approach[1]
             print(f"Speedup over sequential: {speedup:.2f}x")
-        print("\nTheoretical expectations:")
-        print("- Threading: Good for I/O-bound tasks like web scraping")
-        print("- Multiprocessing: Also good but has higher overhead")
-        print("- Async: Best for high concurrency I/O with low overhead")
-        print("- Sequential: Baseline with no parallelism overhead")
-    expected_records = 15  # We have 15 URLs
-    all_correct = all(data["records"] == expected_records for data in results.values())
-    
-    if all_correct:
-        print(f"\n✓ All approaches correctly saved {expected_records} records")
-    else:
-        print(f"\n⚠ Record counts vary:")
-        for approach, data in results.items():
-            print(f"  {approach}: {data['records']} records")
 
 if __name__ == "__main__":
     main()
