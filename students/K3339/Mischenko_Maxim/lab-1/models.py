@@ -1,7 +1,9 @@
 from enum import Enum
 from typing import Optional, List
 from sqlmodel import SQLModel, Field, Relationship
-from pydantic import EmailStr, SecretStr
+from pydantic import field_validator
+from pydantic_core import PydanticCustomError
+import re
 
 
 class ParticipantType(Enum):
@@ -46,17 +48,41 @@ class TeamBase(SQLModel):
 
 class ParticipantBase(SQLModel):
     name: str
-    email: EmailStr
+    email: str = Field(max_length=255)
     phone: Optional[str] = None
     type: ParticipantType
+    
+    @field_validator('email')
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        # Simple email regex validation
+        email_regex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not re.match(email_regex, v):
+            raise PydanticCustomError(
+                'email_error',
+                'Invalid email format'
+            )
+        return v
 
 
 class UserBase(SQLModel):
     username: str
-    email: EmailStr
+    email: str = Field(max_length=255)
     full_name: Optional[str] = None
     is_active: bool = True
     is_superuser: bool = False
+    
+    @field_validator('email')
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        # Simple email regex validation
+        email_regex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not re.match(email_regex, v):
+            raise PydanticCustomError(
+                'email_error',
+                'Invalid email format'
+            )
+        return v
 
 
 class TaskBase(SQLModel):
@@ -166,16 +192,42 @@ class UserResponse(UserBase):
 
 class UserCreate(SQLModel):
     username: str
-    email: EmailStr
+    email: str = Field(max_length=255)
     password: str
     full_name: Optional[str] = None
+    
+    @field_validator('email')
+    @classmethod
+    def validate_email(cls, v: str) -> str:
+        # Simple email regex validation
+        email_regex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not re.match(email_regex, v):
+            raise PydanticCustomError(
+                'email_error',
+                'Invalid email format'
+            )
+        return v
 
 
 class UserUpdate(SQLModel):
-    email: Optional[EmailStr] = None
+    email: Optional[str] = Field(default=None, max_length=255)
     full_name: Optional[str] = None
     password: Optional[str] = None
     is_active: Optional[bool] = None
+    
+    @field_validator('email')
+    @classmethod
+    def validate_email(cls, v: Optional[str]) -> Optional[str]:
+        if v is None:
+            return v
+        # Simple email regex validation
+        email_regex = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not re.match(email_regex, v):
+            raise PydanticCustomError(
+                'email_error',
+                'Invalid email format'
+            )
+        return v
 
 
 class UserLogin(SQLModel):

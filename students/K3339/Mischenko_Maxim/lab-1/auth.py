@@ -12,12 +12,10 @@ from models import User
 
 load_dotenv()
 
-# JWT configuration
 SECRET_KEY = os.getenv("JWT_SECRET_KEY")
 ALGORITHM = os.getenv("JWT_ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("JWT_ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
 
-# HTTP Bearer scheme for token authentication
 bearer_scheme = HTTPBearer(auto_error=False)
 
 
@@ -31,10 +29,8 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
         try:
             hashed_bytes = binascii.unhexlify(hex_str)
         except (binascii.Error, ValueError):
-            # If conversion fails, fall back to treating as regular string
             hashed_bytes = hashed_password.encode('utf-8')
     else:
-        # Regular string (UTF-8 encoded)
         hashed_bytes = hashed_password.encode('utf-8')
 
     return bcrypt.checkpw(plain_password.encode('utf-8'), hashed_bytes)
@@ -43,7 +39,6 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
 def get_password_hash(password: str) -> str:
     """Hash a password."""
     hashed_bytes = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-    # Return as hex string for consistent storage
     import binascii
     return '\\x' + binascii.hexlify(hashed_bytes).decode('utf-8')
 

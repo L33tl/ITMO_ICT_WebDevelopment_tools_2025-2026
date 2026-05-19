@@ -1,5 +1,6 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException, status, Query
 from typing_extensions import TypedDict
+from typing import Optional
 from sqlmodel import Session, select
 from datetime import datetime, timedelta
 
@@ -10,7 +11,8 @@ from models import (
     Task, TaskBase, TaskWithSubmissions,
     Submission, SubmissionBase, SubmissionWithRelations,
     ParticipantSkillLink, TeamParticipantLink,
-    User, UserCreate, UserResponse, UserUpdate, UserLogin, Token
+    User, UserCreate, UserResponse, UserUpdate, UserLogin, Token,
+    ParticipantType
 )
 from connection import get_session, init_db
 from auth import (
@@ -20,6 +22,40 @@ from auth import (
 )
 
 app = FastAPI()
+
+
+def get_pagination_filter(
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
+    name: Optional[str] = Query(None, description="Filter by participant name (partial match)"),
+    email: Optional[str] = Query(None, description="Filter by exact email"),
+    phone: Optional[str] = Query(None, description="Filter by phone number (partial match)"),
+    type: Optional[ParticipantType] = Query(None, description="Filter by participant type")
+):
+    """Dependency for pagination and filtering parameters"""
+    return {
+        "skip": skip,
+        "limit": limit,
+        "name": name,
+        "email": email,
+        "phone": phone,
+        "type": type
+    }
+
+
+def get_team_filter(
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
+    name: Optional[str] = Query(None, description="Filter by team name (partial match)"),
+    description: Optional[str] = Query(None, description="Filter by team description (partial match)")
+):
+    """Dependency for team pagination and filtering parameters"""
+    return {
+        "skip": skip,
+        "limit": limit,
+        "name": name,
+        "description": description
+    }
 
 
 @app.on_event("startup")
@@ -36,7 +72,6 @@ def hello():
 @app.post("/register", response_model=UserResponse, tags=["Authentication"])
 def register(user: UserCreate, session: Session = Depends(get_session)):
     """Register a new user."""
-    # Check if username already exists
     existing_user = session.exec(select(User).where(User.username == user.username)).first()
     if existing_user:
         raise HTTPException(
@@ -44,7 +79,6 @@ def register(user: UserCreate, session: Session = Depends(get_session)):
             detail="Username already registered"
         )
 
-    # Check if email already exists
     existing_email = session.exec(select(User).where(User.email == user.email)).first()
     if existing_email:
         raise HTTPException(
@@ -52,7 +86,6 @@ def register(user: UserCreate, session: Session = Depends(get_session)):
             detail="Email already registered"
         )
 
-    # Create new user
     hashed_password = get_password_hash(user.password)
     db_user = User(
         username=user.username,
@@ -151,11 +184,26 @@ def change_password(
 
 @app.get("/participants", response_model=list[Participant], tags=["Participants"])
 def participants_list(
+    pagination: dict = Depends(get_pagination_filter),
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_active_user)
 ) -> list[Participant]:
-    """Get all participants"""
-    return session.exec(select(Participant)).all()
+    """Get participants with pagination and filtering"""
+    query = select(Participant)
+    
+    if pagination["name"]:
+        query = query.where(Participant.name.ilike(f"%{pagination['name']}%"))
+    if pagination["email"]:
+        query = query.where(Participant.email == pagination["email"])
+    if pagination["phone"]:
+        query = query.where(Participant.phone.ilike(f"%{pagination['phone']}%"))
+    if pagination["type"]:
+        query = query.where(Participant.type == pagination["type"])
+    
+    query = query.offset(pagination["skip"]).limit(pagination["limit"])
+    
+    participants = session.exec(query).all()
+    return participants
 
 
 @app.get("/participant/{participant_id}", response_model=ParticipantWithSkills, tags=["Participants"])
@@ -225,11 +273,22 @@ def participant_delete(
 
 @app.get("/teams", response_model=list[Team], tags=["Teams"])
 def teams_list(
+    filter_params: dict = Depends(get_team_filter),
     session: Session = Depends(get_session),
     current_user: User = Depends(get_current_active_user)
 ) -> list[Team]:
-    """Get all teams"""
-    return session.exec(select(Team)).all()
+    """Get teams with pagination and filtering"""
+    query = select(Team)
+    
+    if filter_params["name"]:
+        query = query.where(Team.name.ilike(f"%{filter_params['name']}%"))
+    if filter_params["description"]:
+        query = query.where(Team.description.ilike(f"%{filter_params['description']}%"))
+    
+    query = query.offset(filter_params["skip"]).limit(filter_params["limit"])
+    
+    teams = session.exec(query).all()
+    return teams
 
 
 @app.get("/team/{team_id}", response_model=TeamWithParticipants, tags=["Teams"])
@@ -242,7 +301,6 @@ def team_get(
     team = session.get(Team, team_id)
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
-    # Trigger loading of participants
     _ = team.participants
     return team
 
@@ -318,7 +376,6 @@ def skill_get(
     skill = session.get(Skill, skill_id)
     if not skill:
         raise HTTPException(status_code=404, detail="Skill not found")
-    # Trigger loading of participants
     _ = skill.participants
     return skill
 

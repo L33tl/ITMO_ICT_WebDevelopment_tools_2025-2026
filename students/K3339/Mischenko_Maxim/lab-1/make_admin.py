@@ -8,7 +8,7 @@ def list_users(session):
     users = session.exec(select(User)).all()
     print("\n=== Current Users ===")
     for user in users:
-        admin_status = "✓ ADMIN" if user.is_superuser else "✗ USER"
+        admin_status = "ADMIN" if user.is_superuser else "USER"
         print(f"ID: {user.id}, Username: {user.username}, Email: {user.email}, Status: {admin_status}")
     return users
 
@@ -25,13 +25,11 @@ def make_user_admin(session, user_identifier):
     """
     user = None
     
-    # Try to find user by ID (if identifier is numeric)
     if user_identifier.isdigit():
         user = session.get(User, int(user_identifier))
         if user:
             print(f"Found user by ID {user_identifier}: {user.username}")
     
-    # If not found by ID, try by username
     if not user:
         statement = select(User).where(User.username == user_identifier)
         user = session.exec(statement).first()
