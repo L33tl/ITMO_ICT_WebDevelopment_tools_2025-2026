@@ -1261,7 +1261,7 @@
 - <a href="https://rendex85.github.io/WebDevelopmentLabsDocs/lr2/lr2/">Текст лабораторной работы</a></p>
 
 <hr />
-<h1 id="lab3">Лабораторная работа 3: Упаковка FastAPI приложения в Docker, Работа с источниками данных и Очереди<a class="headerlink" href="#lab3" title="Permanent link">&para;</a></h1>
+<h1 id="lab3">Лабораторная работа 2 и 3: Упаковка FastAPI приложения в Docker, Работа с источниками данных и Очереди<a class="headerlink" href="#lab3" title="Permanent link">&para;</a></h1>
 <h2 id="lab3-goal">Цель работы<a class="headerlink" href="#lab3-goal" title="Permanent link">&para;</a></h2>
 <p>Упаковка FastAPI приложения, базы данных и парсера данных в Docker контейнеры с созданием оркестрации сервисов через Docker Compose.</p>
 <h2 id="lab3-tasks">Задачи<a class="headerlink" href="#lab3-tasks" title="Permanent link">&para;</a></h2>
@@ -1458,6 +1458,265 @@ print(response.json())
 <p>В рамках лабораторной работы успешно выполнена упаковка FastAPI приложения в Docker контейнеры, реализован HTTP-интерфейс для парсера данных и настроена оркестрация сервисов через Docker Compose. Дополнительно интегрированы Celery и Redis для обработки фоновых задач и периодического парсинга, что повышает масштабируемость и отказоустойчивость системы.</p>
 <p>Все компоненты работают в изолированных контейнерах, обеспечивая простоту развертывания и мониторинга через Flower UI.</p>
 
+<hr />
+<h1 id="lab2">Лабораторная работа 2: Потоки. Процессы. Асинхронность<a class="headerlink" href="#lab2" title="Permanent link">&para;</a></h1>
+<h2 id="lab2-task1">Задача 1: Различия между threading, multiprocessing и async в Python<a class="headerlink" href="#lab2-task1" title="Permanent link">&para;</a></h2>
+<p><strong>Цель:</strong> Написать три программы на Python, использующие threading, multiprocessing и async, для вычисления суммы чисел от 1 до N с параллельным разделением задачи.</p>
+<h3 id="lab2-task1-implementation">Описание реализации<a class="headerlink" href="#lab2-task1-implementation" title="Permanent link">&para;</a></h3>
+<p>Все программы используют общий подход:</p>
+<ul>
+<li>Задача разбивается на <code>K</code> подзадач (чанков).</li>
+<li>Каждая подзадача вычисляет сумму чисел в своём диапазоне с помощью функции <code>calculate_sum(start, end)</code>.</li>
+<li>Результаты подзадач суммируются для получения общего результата.</li>
+<li>Проверка корректности выполняется по формуле <code>N * (N + 1) // 2</code>.</li>
+</ul>
+<p>Для демонстрации выбрано <code>N = 10 000 000</code> (10 миллионов), что позволяет увидеть разницу во времени выполнения без чрезмерного ожидания.</p>
+<h4 id="lab2-threading">1. Threading (<code>threading_sum.py</code>)<a class="headerlink" href="#lab2-threading" title="Permanent link">&para;</a></h4>
+<p>Использует модуль <code>threading</code>. Создаётся несколько потоков, каждый вычисляет свою часть суммы. Из-за Global Interpreter Lock (GIL) в Python потоки не выполняются истинно параллельно на CPU‑bound задачах, что приводит к ограничению производительности.</p>
+<p><strong>Ключевые моменты:</strong></p>
+<ul>
+<li>Количество потоков: 4</li>
+<li>Функция <code>worker</code> сохраняет результат в общий список по индексу</li>
+<li>Основной поток ожидает завершения всех потоков с помощью <code>join()</code></li>
+</ul>
+<h4 id="lab2-multiprocessing">2. Multiprocessing (<code>multiprocessing_sum.py</code>)<a class="headerlink" href="#lab2-multiprocessing" title="Permanent link">&para;</a></h4>
+<p>Использует модуль <code>multiprocessing</code>. Создаются отдельные процессы, каждый со своим интерпретатором Python, что позволяет обойти GIL и использовать несколько ядер CPU.</p>
+<p><strong>Ключевые моменты:</strong></p>
+<ul>
+<li>Количество процессов: 4</li>
+<li>Используется <code>multiprocessing.Pool</code> и метод <code>map</code> для распределения задач</li>
+<li>Результаты собираются и суммируются в основном процессе</li>
+</ul>
+<h4 id="lab2-async">3. Async (<code>async_sum.py</code>)<a class="headerlink" href="#lab2-async" title="Permanent link">&para;</a></h4>
+<p>Использует модуль <code>asyncio</code> и ключевые слова <code>async</code>/<code>await</code>. Поскольку вычисление суммы – CPU‑bound операция, для её выполнения без блокировки event loop применяется <code>loop.run_in_executor</code>, который запускает функцию в отдельном потоке.</p>
+<p><strong>Ключевые моменты:</strong></p>
+<ul>
+<li>Количество задач: 4</li>
+<li>Каждая задача выполняется в потоке через <code>run_in_executor</code></li>
+<li>Задачи запускаются конкурентно с помощью <code>asyncio.gather</code></li>
+</ul>
+<h4 id="lab2-sequential">4. Sequential (<code>sequential_sum.py</code>)<a class="headerlink" href="#lab2-sequential" title="Permanent link">&para;</a></h4>
+<p>Последовательная (однопоточная) реализация для сравнения производительности.</p>
+<h3 id="lab2-task1-results">Результаты измерений<a class="headerlink" href="#lab2-task1-results" title="Permanent link">&para;</a></h3>
+<p>Запуск на системе:</p>
+<ul>
+<li>ОС: Linux 6.6</li>
+<li>Python: 3.12.3</li>
+<li>Процессор: 4 ядра (предположительно)</li>
+</ul>
+<p>Время выполнения (в секундах) для N = 10 000 000:</p>
+<table>
+<thead>
+<tr>
+<th>Подход</th>
+<th>Время (с)</th>
+<th>Ускорение относительно Sequential</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Sequential</td>
+<td>0.2180</td>
+<td>1.00x</td>
+</tr>
+<tr>
+<td>Threading</td>
+<td>0.2351</td>
+<td>0.93x</td>
+</tr>
+<tr>
+<td>Multiprocessing</td>
+<td>0.0754</td>
+<td>2.89x</td>
+</tr>
+<tr>
+<td>Async</td>
+<td>0.2439</td>
+<td>0.89x</td>
+</tr>
+</tbody>
+</table>
+<p><em>Примечание: время измеряется как внутреннее время работы алгоритма, сообщаемое самой программой.</em></p>
+<h3 id="lab2-task1-analysis">Анализ результатов<a class="headerlink" href="#lab2-task1-analysis" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Multiprocessing</strong> показал наибольшее ускорение (~2.89×) благодаря использованию нескольких ядер CPU и отсутствию GIL.</li>
+<li><strong>Threading</strong> и <strong>Async</strong> оказались немного медленнее последовательной версии из‑за накладных расходов на переключение потоков и GIL (для threading) и на организацию event loop (для async).</li>
+<li><strong>Async</strong> с <code>run_in_executor</code> по сути использует те же потоки, что и threading, поэтому его производительность близка к threading.</li>
+<li><strong>Sequential</strong> версия служит базовой линией; её время примерно равно времени одного потока.</li>
+</ol>
+<p>Выводы:</p>
+<ul>
+<li>Для CPU‑bound задач (тяжёлые вычисления) <strong>multiprocessing</strong> является предпочтительным подходом.</li>
+<li><strong>Threading</strong> в Python подходит для I/O‑bound задач, где потоки могут ожидать ввода‑вывода, освобождая GIL.</li>
+<li><strong>Async</strong> эффективен для большого количества I/O‑операций с низкими накладными расходами, но для чистых вычислений требует запуска в отдельных потоках/процессах.</li>
+</ul>
+<h3 id="lab2-task1-run">Как запустить программы<a class="headerlink" href="#lab2-task1-run" title="Permanent link">&para;</a></h3>
+<p>Все скрипты находятся в одном каталоге. Для запуска каждого подхода выполните:</p>
+<div class="highlight"><pre><span></span><code>python3 sequential_sum.py
+python3 threading_sum.py
+python3 multiprocessing_sum.py
+python3 async_sum.py
+</code></pre></div>
+<p>Для автоматического сравнения производительности запустите:</p>
+<div class="highlight"><pre><span></span><code>python3 compare.py
+</code></pre></div>
+<p>Скрипт <code>compare.py</code> запустит все четыре программы, извлечёт время выполнения и выведет сводную таблицу.</p>
+<h3 id="lab2-task1-structure">Структура файлов<a class="headerlink" href="#lab2-task1-structure" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>sequential_sum.py</code> – последовательная реализация</li>
+<li><code>threading_sum.py</code> – реализация с использованием threading</li>
+<li><code>multiprocessing_sum.py</code> – реализация с использованием multiprocessing</li>
+<li><code>async_sum.py</code> – реализация с использованием asyncio</li>
+<li><code>compare.py</code> – скрипт для сравнения производительности</li>
+<li><code>lab2_report.md</code> – данный отчёт</li>
+</ul>
+<h2 id="lab2-task2">Задача 2: Параллельный парсинг веб-страниц с сохранением в базу данных<a class="headerlink" href="#lab2-task2" title="Permanent link">&para;</a></h2>
+<p><strong>Цель:</strong> Написать три программы на Python, использующие threading, multiprocessing и async, для параллельного парсинга веб-страниц с сохранением данных в базу данных.</p>
+<h3 id="lab2-task2-implementation">Описание реализации<a class="headerlink" href="#lab2-task2-implementation" title="Permanent link">&para;</a></h3>
+<p>Все программы используют общий подход:</p>
+<ul>
+<li>Создаётся база данных SQLite с таблицей <code>web_pages</code> для хранения URL и заголовков страниц.</li>
+<li>Определяется функция <code>parse_and_save(url)</code>, которая загружает HTML-страницу, извлекает заголовок и сохраняет его в базу данных.</li>
+<li>Список из 15 популярных веб-сайтов разбивается на части для параллельной обработки.</li>
+<li>Измеряется время выполнения и сравнивается эффективность разных подходов.</li>
+</ul>
+<h4 id="lab2-threading-scraper">1. Threading (<code>threading_scraper.py</code>)<a class="headerlink" href="#lab2-threading-scraper" title="Permanent link">&para;</a></h4>
+<p>Использует модуль <code>threading</code> для создания нескольких потоков, каждый из которых обрабатывает свою часть URL-адресов. Поскольку веб-парсинг является I/O-bound операцией (ожидание сетевых запросов), потоки могут работать эффективно, освобождая GIL во время ожидания ответов от серверов.</p>
+<p><strong>Ключевые моменты:</strong></p>
+<ul>
+<li>Количество потоков: 4</li>
+<li>Используются библиотеки <code>requests</code> и <code>BeautifulSoup</code></li>
+<li>Результаты сохраняются в общую базу данных SQLite</li>
+<li>Применяется потокобезопасное соединение с базой данных (каждый поток открывает своё соединение)</li>
+</ul>
+<h4 id="lab2-multiprocessing-scraper">2. Multiprocessing (<code>multiprocessing_scraper.py</code>)<a class="headerlink" href="#lab2-multiprocessing-scraper" title="Permanent link">&para;</a></h4>
+<p>Использует модуль <code>multiprocessing</code> для создания отдельных процессов. Каждый процесс имеет собственный интерпретатор Python и независимую память, что позволяет полностью обойти GIL. Для I/O-bound задач multiprocessing также эффективен, но имеет более высокие накладные расходы на создание процессов и межпроцессное взаимодействие.</p>
+<p><strong>Ключевые моменты:</strong></p>
+<ul>
+<li>Количество процессов: 4</li>
+<li>Используется <code>multiprocessing.Pool</code> для распределения задач</li>
+<li>Каждый процесс создаёт своё соединение с базой данных</li>
+<li>Результаты собираются через механизм межпроцессного взаимодействия</li>
+</ul>
+<h4 id="lab2-async-scraper">3. Async (<code>async_scraper.py</code>)<a class="headerlink" href="#lab2-async-scraper" title="Permanent link">&para;</a></h4>
+<p>Использует асинхронное программирование с <code>asyncio</code> и <code>aiohttp</code> для неблокирующих HTTP-запросов. Это наиболее эффективный подход для I/O-bound задач, так как позволяет обрабатывать множество соединений в одном потоке с минимальными накладными расходами.</p>
+<p><strong>Ключевые моменты:</strong></p>
+<ul>
+<li>Используются <code>aiohttp</code> для асинхронных HTTP-запросов</li>
+<li><code>aiosqlite</code> для асинхронной работы с базой данных</li>
+<li><code>asyncio.gather</code> для конкурентного выполнения задач</li>
+<li>Ограничение на количество одновременных соединений: 10</li>
+</ul>
+<h4 id="lab2-sequential-scraper">4. Sequential (<code>sequential_scraper.py</code>)<a class="headerlink" href="#lab2-sequential-scraper" title="Permanent link">&para;</a></h4>
+<p>Последовательная (однопоточная) реализация для сравнения производительности. Обрабатывает URL-адреса один за другим, служит базовой линией для оценки ускорения от параллельных подходов.</p>
+<h3 id="lab2-task2-results">Результаты измерений<a class="headerlink" href="#lab2-task2-results" title="Permanent link">&para;</a></h3>
+<p>Запуск на системе:</p>
+<ul>
+<li>ОС: Linux 6.6</li>
+<li>Python: 3.12.3</li>
+<li>Процессор: 4 ядра</li>
+<li>Сеть: домашнее подключение (~100 Мбит/с)</li>
+</ul>
+<p>Время выполнения (в секундах) для парсинга 15 веб-страниц (реальные измерения):</p>
+<table>
+<thead>
+<tr>
+<th>Подход</th>
+<th>Время (с)</th>
+<th>Ускорение относительно Sequential</th>
+<th>Успешно обработано</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Sequential</td>
+<td>24.50</td>
+<td>1.00x</td>
+<td>10 из 15</td>
+</tr>
+<tr>
+<td>Threading</td>
+<td>11.09</td>
+<td>2.21x</td>
+<td>11 из 15</td>
+</tr>
+<tr>
+<td>Multiprocessing</td>
+<td>11.10</td>
+<td>2.21x</td>
+<td>11 из 15</td>
+</tr>
+<tr>
+<td>Async</td>
+<td>13.79</td>
+<td>1.78x</td>
+<td>12 из 15</td>
+</tr>
+</tbody>
+</table>
+<p><em>Примечание: не все сайты доступны для парсинга (некоторые возвращают ошибки 403, 503, таймауты), поэтому успешно обработано 10-12 из 15 URL. Различия в количестве успешных запросов обусловлены изменчивостью доступности сайтов и различиями в обработке ошибок между подходами.</em></p>
+<h3 id="lab2-task2-analysis">Анализ результатов<a class="headerlink" href="#lab2-task2-analysis" title="Permanent link">&para;</a></h3>
+<ol>
+<li><strong>Threading</strong> показал наилучшее ускорение (~2.21×) в данном тесте, что соответствует ожиданиям для I/O-bound задач. Потоки эффективно используют время ожидания сетевых запросов, освобождая GIL.</li>
+<li><strong>Multiprocessing</strong> показал практически идентичное время выполнения (~2.21× ускорения), что демонстрирует его эффективность для I/O-bound задач, несмотря на более высокие накладные расходы на создание процессов.</li>
+<li><strong>Async</strong> показал ускорение ~1.78×, что меньше, чем у threading и multiprocessing в данном конкретном тесте. Это может быть объяснено несколькими факторами:<ul>
+<li>Ограничениями на количество одновременных соединений (10)</li>
+<li>Особенностями обработки ошибок в асинхронном коде</li>
+<li>Сетевыми задержками и изменчивостью доступности сайтов между запусками</li>
+<li>Тем не менее, async обработал больше сайтов успешно (12 из 15)</li>
+</ul>
+</li>
+<li><strong>Sequential</strong> версия служит базовой линией и демонстрирует, насколько эффективны параллельные подходы для I/O-bound задач (все подходы дали ускорение от 1.78× до 2.21×).</li>
+</ol>
+<p>Выводы:</p>
+<ul>
+<li>Для I/O-bound задач (веб-парсинг, работа с сетью, файлами) <strong>threading</strong> и <strong>multiprocessing</strong> показывают сравнимую производительность.</li>
+<li><strong>Async</strong> в теории должен быть наиболее эффективным для большого количества I/O-операций, но на практике его производительность может зависеть от конкретной реализации, настроек и сетевых условий.</li>
+<li><strong>Multiprocessing</strong> имеет более высокие накладные расходы на создание процессов, но для I/O-bound задач это не является критичным недостатком.</li>
+<li>Все параллельные подходы дают значительное ускорение (1.78-2.21×) по сравнению с последовательным выполнением для задач, связанных с ожиданием I/O.</li>
+</ul>
+<h3 id="lab2-task2-run">Как запустить программы<a class="headerlink" href="#lab2-task2-run" title="Permanent link">&para;</a></h3>
+<p>Все скрипты находятся в одном каталоге. Перед запуском установите необходимые зависимости:</p>
+<div class="highlight"><pre><span></span><code>pip install requests beautifulsoup4 aiohttp aiosqlite
+</code></pre></div>
+<p>Инициализируйте базу данных:</p>
+<div class="highlight"><pre><span></span><code>python3 init_db.py
+</code></pre></div>
+<p>Запустите скрипты парсинга:</p>
+<div class="highlight"><pre><span></span><code>python3 sequential_scraper.py
+python3 threading_scraper.py
+python3 multiprocessing_scraper.py
+python3 async_scraper.py
+</code></pre></div>
+<p>Для автоматического сравнения производительности всех подходов запустите:</p>
+<div class="highlight"><pre><span></span><code>python3 compare_scrapers.py
+</code></pre></div>
+<p>Скрипт <code>compare_scrapers.py</code> запустит все четыре программы, очистит базу данных между запусками, измерит время выполнения и выведет сводную таблицу.</p>
+<h3 id="lab2-task2-structure">Структура файлов<a class="headerlink" href="#lab2-task2-structure" title="Permanent link">&para;</a></h3>
+<ul>
+<li><code>init_db.py</code> – инициализация базы данных SQLite</li>
+<li><code>sequential_scraper.py</code> – последовательный парсинг веб-страниц</li>
+<li><code>threading_scraper.py</code> – многопоточный парсинг</li>
+<li><code>multiprocessing_scraper.py</code> – многопроцессный парсинг</li>
+<li><code>async_scraper.py</code> – асинхронный парсинг</li>
+<li><code>compare_scrapers.py</code> – скрипт для сравнения производительности</li>
+<li><code>web_scraping.db</code> – база данных SQLite (создаётся автоматически)</li>
+</ul>
+<h3 id="lab2-conclusion">Заключение<a class="headerlink" href="#lab2-conclusion" title="Permanent link">&para;</a></h3>
+<p>Лабораторная работа наглядно демонстрирует различия между threading, multiprocessing и async в контексте как CPU-bound (вычисление суммы), так и I/O-bound (веб-парсинг) задач. Полученные результаты соответствуют теоретическим ожиданиям с некоторыми практическими нюансами:</p>
+<ol>
+<li><strong>Для CPU-bound задач</strong> (вычисление суммы чисел) наиболее эффективен <strong>multiprocessing</strong> (ускорение 2.89×), так как он позволяет использовать несколько ядер CPU и обходит ограничения GIL.</li>
+<li><strong>Для I/O-bound задач</strong> (веб-парсинг) в нашем тесте <strong>threading</strong> показал наилучшее ускорение (2.21×), что подтверждает его эффективность для задач с ожиданием I/O. <strong>Multiprocessing</strong> показал сравнимую производительность (2.21×), а <strong>async</strong> показал ускорение 1.78×.</li>
+<li><strong>Threading</strong> хорошо подходит для I/O-bound задач с умеренным количеством соединений, обеспечивая хороший баланс между простотой реализации и производительностью.</li>
+<li><strong>Async</strong> в теории должен быть наиболее эффективным для I/O-bound задач с большим количеством соединений, но на практике его производительность может зависеть от конкретной реализации, сетевых условий и настроек параллелизма.</li>
+<li>Выбор подхода зависит от характера задачи и конкретных требований:<ul>
+<li>CPU-bound задачи → multiprocessing</li>
+<li>I/O-bound задачи с умеренным параллелизмом → threading</li>
+<li>I/O-bound задачи с очень большим количеством соединений → async</li>
+<li>Простые задачи или прототипирование → sequential (как базовая линия)</li>
+</ul>
+</li>
+</ol>
 
 
 
