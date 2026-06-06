@@ -12,7 +12,7 @@ from models import (
     Submission, SubmissionBase, SubmissionWithRelations,
     ParticipantSkillLink, TeamParticipantLink,
     User, UserCreate, UserResponse, UserUpdate, UserLogin, Token,
-    ParticipantType
+    ParticipantType, ReviewRequest
 )
 from connection import get_session, init_db
 from auth import (
@@ -584,6 +584,108 @@ def submission_delete(
     session.delete(submission)
     session.commit()
     return {"status": 200, "message": "Submission deleted successfully"}
+
+
+@app.post("/submission/{submission_id}/review", response_model=SubmissionWithRelations, tags=["Reviews"])
+def submission_review(
+    submission_id: int,
+    review: ReviewRequest,
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Review a submission: set score, status, and review comment (superuser only)."""
+    # Only superusers can review submissions
+    if not current_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only superusers can review submissions"
+        )
+    
+    db_submission = session.get(Submission, submission_id)
+    if not db_submission:
+        raise HTTPException(status_code=404, detail="Submission not found")
+    
+    if db_submission.status != "pending":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Submission already reviewed (current status: {db_submission.status})"
+        )
+    
+    # Validate status value
+    if review.status not in ("approved", "rejected"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Status must be 'approved' or 'rejected'"
+        )
+    
+    db_submission.score = review.score
+    db_submission.reviewer_id = current_user.id
+    db_submission.review_comment = review.review_comment
+    db_submission.reviewed_at = datetime.utcnow().isoformat()
+    db_submission.status = review.status
+    
+    session.add(db_submission)
+    session.commit()
+    session.refresh(db_submission)
+    
+    # Trigger loading of relations for response
+    _ = db_submission.task
+    _ = db_submission.team
+    _ = db_submission.participant
+    _ = db_submission.reviewer
+    
+    return db_submission
+
+
+@app.get("/submissions/review/pending", response_model=list[Submission], tags=["Reviews"])
+def submissions_pending_review(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get all submissions pending review."""
+    query = select(Submission).where(Submission.status == "pending")
+    submissions = session.exec(query).all()
+    return submissions
+
+
+@app.get("/submissions/review/completed", response_model=list[SubmissionWithRelations], tags=["Reviews"])
+def submissions_completed_review(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get all reviewed submissions (approved or rejected)."""
+    query = select(Submission).where(Submission.status.in_(["approved", "rejected"]))
+    submissions = session.exec(query).all()
+    # Trigger loading of relations
+    for s in submissions:
+        _ = s.task
+        _ = s.team
+        _ = s.participant
+        _ = s.reviewer
+    return submissions
+
+
+@app.get("/submissions/review/my", response_model=list[SubmissionWithRelations], tags=["Reviews"])
+def submissions_reviewed_by_me(
+    session: Session = Depends(get_session),
+    current_user: User = Depends(get_current_active_user)
+):
+    """Get all submissions reviewed by the current user (superuser only)."""
+    if not current_user.is_superuser:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only superusers can view their reviews"
+        )
+    
+    query = select(Submission).where(Submission.reviewer_id == current_user.id)
+    submissions = session.exec(query).all()
+    # Trigger loading of relations
+    for s in submissions:
+        _ = s.task
+        _ = s.team
+        _ = s.participant
+        _ = s.reviewer
+    return submissions
 
 
 @app.post("/participant/{participant_id}/skill/{skill_id}", tags=["Relationships"])

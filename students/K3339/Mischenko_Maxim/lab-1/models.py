@@ -98,6 +98,16 @@ class SubmissionBase(SQLModel):
     description: str
     repository_url: Optional[str] = None
     demo_url: Optional[str] = None
+    task_id: int = Field(foreign_key="task.id", description="ID задачи")
+    team_id: int = Field(foreign_key="team.id", description="ID команды")
+    participant_id: int = Field(foreign_key="participant.id", description="ID участника")
+
+
+class ReviewRequest(SQLModel):
+    """Request model for reviewing a submission."""
+    score: float = Field(ge=0, le=100, description="Score from 0 to 100")
+    review_comment: Optional[str] = None
+    status: str = Field(default="approved", description="approved or rejected")
 
 
 # Table models with relationships
@@ -132,6 +142,7 @@ class User(UserBase, table=True):
     hashed_password: str = Field(nullable=False)
     created_at: Optional[str] = Field(default=None, nullable=True)
     updated_at: Optional[str] = Field(default=None, nullable=True)
+    reviewed_submissions: List["Submission"] = Relationship(back_populates="reviewer")
 
 
 class Task(TaskBase, table=True):
@@ -145,9 +156,17 @@ class Submission(SubmissionBase, table=True):
     team_id: Optional[int] = Field(default=None, foreign_key="team.id")
     participant_id: Optional[int] = Field(default=None, foreign_key="participant.id")
     
+    # Review fields
+    score: Optional[float] = Field(default=None, ge=0, le=100, description="Score from 0 to 100")
+    reviewer_id: Optional[int] = Field(default=None, foreign_key="user.id")
+    review_comment: Optional[str] = Field(default=None)
+    reviewed_at: Optional[str] = Field(default=None)
+    status: str = Field(default="pending", description="pending, approved, or rejected")
+    
     task: Optional[Task] = Relationship(back_populates="submissions")
     team: Optional[Team] = Relationship(back_populates="submissions")
     participant: Optional[Participant] = Relationship(back_populates="submissions")
+    reviewer: Optional[User] = Relationship(back_populates="reviewed_submissions")
 
 
 # Response models with nested relationships
@@ -175,20 +194,23 @@ class TaskWithSubmissions(TaskBase):
     id: int
     submissions: List[Submission] = []
 
-
-class SubmissionWithRelations(SubmissionBase):
-    id: int
-    task: Optional[Task] = None
-    team: Optional[Team] = None
-    participant: Optional[Participant] = None
-
-
 # User response models
 class UserResponse(UserBase):
     id: int
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
+class SubmissionWithRelations(SubmissionBase):
+    id: int
+    score: Optional[float] = None
+    reviewer_id: Optional[int] = None
+    review_comment: Optional[str] = None
+    reviewed_at: Optional[str] = None
+    status: str = "pending"
+    task: Optional[Task] = None
+    team: Optional[Team] = None
+    participant: Optional[Participant] = None
+    reviewer: Optional[UserResponse] = None
 
 class UserCreate(SQLModel):
     username: str

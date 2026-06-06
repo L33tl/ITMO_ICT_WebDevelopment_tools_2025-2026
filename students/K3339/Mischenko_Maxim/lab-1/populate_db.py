@@ -5,10 +5,11 @@ This script creates Skills, Participants, Teams, Tasks, and Submissions with rea
 """
 
 import sys
+from datetime import datetime
 from sqlmodel import Session, select
 from connection import engine, init_db
 from models import (
-    Skill, Participant, Team, Task, Submission,
+    Skill, Participant, Team, Task, Submission, User,
     ParticipantSkillLink, TeamParticipantLink,
     ParticipantType
 )
@@ -338,8 +339,36 @@ def assign_participants_to_teams(session, participants, teams):
     return links_created
 
 
-def create_submissions(session, tasks, teams, participants):
-    """Create submissions for tasks"""
+def create_admin_user(session):
+    """Create a default admin user for reviewing submissions."""
+    from auth import get_password_hash
+    
+    existing = session.exec(select(User).where(User.username == "admin")).first()
+    if existing:
+        print("Admin user already exists, skipping")
+        return existing
+    
+    admin = User(
+        username="admin",
+        email="admin@hackathon.com",
+        full_name="Administrator",
+        hashed_password=get_password_hash("admin123"),
+        is_active=True,
+        is_superuser=True,
+        created_at=datetime.utcnow().isoformat(),
+        updated_at=datetime.utcnow().isoformat()
+    )
+    session.add(admin)
+    session.commit()
+    session.refresh(admin)
+    print(f"Created admin user (id={admin.id})")
+    return admin
+
+
+def create_submissions(session, tasks, teams, participants, admin_user=None):
+    """Create submissions for tasks, some with reviews"""
+    now = datetime.utcnow().isoformat()
+    
     submissions_data = [
         {
             "title": "HackPlatform v1.0",
@@ -349,6 +378,12 @@ def create_submissions(session, tasks, teams, participants):
             "task_id": tasks[0].id if len(tasks) > 0 else None,
             "team_id": teams[0].id if len(teams) > 0 else None,
             "participant_id": participants[0].id if len(participants) > 0 else None,
+            # Reviewed submission
+            "score": 85.5,
+            "reviewer_id": admin_user.id if admin_user else None,
+            "review_comment": "Отличная работа! Хорошая архитектура, чистая кодовая база. Рекомендуется улучшить документацию API.",
+            "reviewed_at": now,
+            "status": "approved",
         },
         {
             "title": "AI Task Planner",
@@ -358,6 +393,12 @@ def create_submissions(session, tasks, teams, participants):
             "task_id": tasks[1].id if len(tasks) > 1 else None,
             "team_id": teams[4].id if len(teams) > 4 else None,
             "participant_id": participants[4].id if len(participants) > 4 else None,
+            # Reviewed submission
+            "score": 72.0,
+            "reviewer_id": admin_user.id if admin_user else None,
+            "review_comment": "Хорошая идея, но не хватает тестов и документации. ML модель требует доработки.",
+            "reviewed_at": now,
+            "status": "approved",
         },
         {
             "title": "EcoTrack Pro",
@@ -367,6 +408,12 @@ def create_submissions(session, tasks, teams, participants):
             "task_id": tasks[2].id if len(tasks) > 2 else None,
             "team_id": teams[2].id if len(teams) > 2 else None,
             "participant_id": participants[3].id if len(participants) > 3 else None,
+            # Rejected submission
+            "score": 35.0,
+            "reviewer_id": admin_user.id if admin_user else None,
+            "review_comment": "К сожалению, решение не соответствует требованиям. Отсутствует базовая функциональность, много багов.",
+            "reviewed_at": now,
+            "status": "rejected",
         },
         {
             "title": "CodeGame Learning Platform",
@@ -376,6 +423,8 @@ def create_submissions(session, tasks, teams, participants):
             "task_id": tasks[3].id if len(tasks) > 3 else None,
             "team_id": teams[0].id if len(teams) > 0 else None,
             "participant_id": participants[6].id if len(participants) > 6 else None,
+            # Pending (not yet reviewed)
+            "status": "pending",
         },
     ]
     
@@ -402,6 +451,7 @@ def clear_database(session):
     session.exec("DELETE FROM teams")
     session.exec("DELETE FROM participants")
     session.exec("DELETE FROM skills")
+    session.exec("DELETE FROM \"user\"")
     
     session.commit()
     print("Database cleared")
@@ -424,12 +474,15 @@ def main():
         teams = create_teams(session)
         tasks = create_tasks(session)
         
+        # Create admin user for reviews
+        admin_user = create_admin_user(session)
+        
         # Create relationships
         assign_skills_to_participants(session, participants, skills)
         assign_participants_to_teams(session, participants, teams)
         
         # Create submissions (needs IDs from created entities)
-        submissions = create_submissions(session, tasks, teams, participants)
+        submissions = create_submissions(session, tasks, teams, participants, admin_user)
         
         print("\n=== Database Population Summary ===")
         print(f"Skills: {len(skills)}")
@@ -443,6 +496,12 @@ def main():
         team_links = session.exec(select(TeamParticipantLink)).all()
         print(f"Participant-Skill links: {len(skill_links)}")
         print(f"Team-Participant links: {len(team_links)}")
+        
+        # Count reviewed vs pending
+        reviewed = session.exec(select(Submission).where(Submission.status != "pending")).all()
+        pending = session.exec(select(Submission).where(Submission.status == "pending")).all()
+        print(f"Reviewed submissions: {len(reviewed)}")
+        print(f"Pending submissions: {len(pending)}")
         
         print("\nDatabase populated successfully!")
 
